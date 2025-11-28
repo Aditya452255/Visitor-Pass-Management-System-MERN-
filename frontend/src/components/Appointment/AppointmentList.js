@@ -221,12 +221,12 @@ const AppointmentList = () => {
             </tr>
           </thead>
           <tbody>
-            {appointments.length === 0 ? (
+            {filteredAppointments.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ textAlign: 'center' }}>No appointments found</td>
               </tr>
             ) : (
-              appointments.map((appointment) => {
+              filteredAppointments.map((appointment) => {
                 const dateText = appointment?.appointmentDate
                   ? (() => {
                       const d = new Date(appointment.appointmentDate);
