@@ -1,0 +1,70 @@
+.checklog-list-container,
+.checkin-container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.verify-section {
+  background: #f8f9fa;
+  padding: 1.5rem;
+  border-radius: 8px;
+  margin-bottom: 2rem;
+}
+
+.verify-section h3 {
+  margin: 0 0 1rem 0;
+  color: #333;
+}
+
+.verify-input-group {
+  display: flex;
+  gap: 1rem;
+}
+
+.verify-input {
+  flex: 1;
+  padding: 0.75rem;
+  border: 2px solid #ddd;
+  border-radius: 4px;
+  font-size: 1rem;
+  transition: border-color 0.3s;
+}
+
+.verify-input:focus {
+  outline: none;
+  border-color: #667eea;
+}
+
+.pass-details-section {
+  margin-bottom: 2rem;
+}
+
+.pass-info-card {
+  background: #e8f5e9;
+  padding: 1.5rem;
+  border-radius: 8px;
+  border: 2px solid #4caf50;
+}
+
+.checkbox-group {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto;
+  cursor: pointer;
+}
+
+.mt-1 {
+  margin-top: 0.5rem;
+}
