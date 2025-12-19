@@ -55,6 +55,8 @@ const CheckLogList = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentPage]);
 
+  // Note: handleCheckOut not currently used in UI - reserved for future checkout feature
+  // eslint-disable-next-line no-unused-vars
   const handleCheckOut = async (id) => {
     const notes = prompt('Add checkout notes (optional):');
     try {
