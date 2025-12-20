@@ -47,8 +47,8 @@ router.patch('/:id/approve', checkRole('admin', 'employee'), approveAppointment)
 // Reject appointment
 router.patch('/:id/reject', checkRole('admin', 'employee'), rejectAppointment);
 
-// Cancel appointment (✅ restricted)
-router.patch('/:id/cancel', checkRole('admin', 'employee'), cancelAppointment);
+// Cancel appointment: allow admin/employee, and visitors to cancel their own appointments
+router.patch('/:id/cancel', checkRole('admin', 'employee', 'visitor'), cancelAppointment);
 
 // Update appointment
 router.patch('/:id', updateAppointment);

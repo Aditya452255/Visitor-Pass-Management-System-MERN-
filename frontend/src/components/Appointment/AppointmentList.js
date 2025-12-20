@@ -27,13 +27,13 @@ const AppointmentList = () => {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
 
-  const fetchAppointments = async (page = currentPage, status = filter) => {
+  const fetchAppointments = async (page = currentPage, status = filter, silent = false) => {
     if (!effectiveRole) {
-        setLoading(false);
+        if (!silent) setLoading(false);
         return;
     }
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       // If logged-in visitor, fetch their own appointments
       if (effectiveRole === 'visitor') {
         const res = await appointmentAPI.getMy();
@@ -72,7 +72,7 @@ const AppointmentList = () => {
       setAppointments([]);
       setTotalPages(1);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   };
 
@@ -88,8 +88,9 @@ const AppointmentList = () => {
     let timer;
     if (effectiveRole === 'visitor') {
       timer = setInterval(() => {
-        fetchAppointments();
-      }, 8000); // every 8 seconds
+        // Silent refresh to avoid loader flicker
+        fetchAppointments(currentPage, filter, true);
+      }, 15000); // every 15 seconds
     }
     return () => clearInterval(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,8 +147,15 @@ const AppointmentList = () => {
       const stored = (() => {
         try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
       })();
-      if (!stored || (stored.role !== 'admin' && stored.role !== 'employee')) {
-        alert('Action blocked: current session token is not authorized to cancel. Please login as admin/employee.');
+      if (!stored) {
+        alert('Action blocked: please login to cancel.');
+        return;
+      }
+
+      // Allow admin/employee; also allow visitor (backend will verify ownership)
+      const role = stored.role;
+      if (role !== 'admin' && role !== 'employee' && role !== 'visitor') {
+        alert('Action blocked: current session is not authorized to cancel appointments.');
         return;
       }
 

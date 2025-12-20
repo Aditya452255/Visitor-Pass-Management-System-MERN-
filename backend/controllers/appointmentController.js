@@ -565,6 +565,15 @@ const cancelAppointment = async (req, res) => {
       }
     }
 
+    // Visitors can cancel only their own appointments
+    if (req.user && req.user.role === 'visitor') {
+      const visitorDoc = await Visitor.findOne({ user: req.user._id });
+      const apptVisitorId = appointment.visitor?._id?.toString();
+      if (!visitorDoc || !apptVisitorId || apptVisitorId !== visitorDoc._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: only the appointment owner can cancel' });
+      }
+    }
+
     appointment.status = 'cancelled';
     await appointment.save();
 
