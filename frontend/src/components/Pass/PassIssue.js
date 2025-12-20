@@ -1,17 +1,15 @@
 // PassIssue.js (fixed)
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { passesAPI, visitorAPI, usersAPI, appointmentAPI } from '../../services/api';
+import { passesAPI, visitorAPI, usersAPI } from '../../services/api';
 import './Pass.css';
 
 const PassIssue = () => {
   const navigate = useNavigate();
   const [visitors, setVisitors] = useState([]);
   const [hosts, setHosts] = useState([]);
-  const [appointments, setAppointments] = useState([]);
   const [formData, setFormData] = useState({
     visitorId: '',
-    appointmentId: '',
     hostId: '',
     validFrom: new Date().toISOString().slice(0, 16),
     validUntil: new Date(Date.now() + 60 * 60 * 1000).toISOString().slice(0, 16), // default +1 hour
@@ -24,10 +22,9 @@ const PassIssue = () => {
   // moved function above useEffect for clarity
   const fetchData = async () => {
     try {
-      const [visitorsData, hostsData, appointmentsData] = await Promise.all([
+      const [visitorsData, hostsData] = await Promise.all([
         visitorAPI.getAll({ limit: 100 }),
-        usersAPI.getHosts(),
-        appointmentAPI.getAll({ status: 'approved', limit: 100 })
+        usersAPI.getHosts()
       ]);
 
       // API may return arrays directly or wrapped objects
@@ -60,11 +57,8 @@ const PassIssue = () => {
             );
           })
         : [];
-      const appointmentsList = appointmentsData?.appointments || appointmentsData || [];
-
       setVisitors(Array.isArray(visitorsList) ? visitorsList : []);
       setHosts(filteredHosts);
-      setAppointments(Array.isArray(appointmentsList) ? appointmentsList : []);
     } catch (error) {
       console.error('Error fetching data:', error);
     }
@@ -92,33 +86,7 @@ const PassIssue = () => {
     }));
   };
 
-  const handleAppointmentSelect = (e) => {
-    const appointmentId = e.target.value;
-    const appointment = appointments.find(a => a._id === appointmentId);
-
-    if (appointment) {
-      const appointmentDate = appointment.appointmentDate || appointment.date || null;
-      const durationMinutes = appointment.duration ?? 60;
-      const fromIso = appointmentDate ? new Date(appointmentDate).toISOString().slice(0, 16) : formData.validFrom;
-      const untilIso = appointmentDate
-        ? new Date(new Date(appointmentDate).getTime() + durationMinutes * 60000).toISOString().slice(0, 16)
-        : formData.validUntil;
-
-      setFormData(prev => ({
-        ...prev,
-        appointmentId,
-        visitorId: appointment.visitor?._id || prev.visitorId,
-        hostId: appointment.host?._id || prev.hostId,
-        validFrom: fromIso,
-        validUntil: untilIso
-      }));
-    } else {
-      setFormData(prev => ({
-        ...prev,
-        appointmentId: ''
-      }));
-    }
-  };
+  
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -165,18 +133,7 @@ const PassIssue = () => {
         {error && <div className="error">{error}</div>}
 
         <form onSubmit={handleSubmit}>
-          <div className="form-group">
-            <label>Select from Approved Appointment (Optional)</label>
-            <select onChange={handleAppointmentSelect} value={formData.appointmentId || ''}>
-              <option value="">-- Create Pass Manually --</option>
-              {appointments.map(appointment => (
-                <option key={appointment._id || appointment.id} value={appointment._id || appointment.id}>
-                  {appointment.visitor?.name || 'Visitor'} - {appointment.host?.name || 'Host'} -{' '}
-                  {appointment.appointmentDate ? new Date(appointment.appointmentDate).toLocaleDateString() : 'Date'}
-                </option>
-              ))}
-            </select>
-          </div>
+          
 
           <div className="form-row">
             <div className="form-group">

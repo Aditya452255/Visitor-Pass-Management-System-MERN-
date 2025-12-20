@@ -1,4 +1,4 @@
-// VisitorList.js (fixed - ensures buttons have type="button" to prevent form submit reloads)
+// VisitorList.js (admin view: remove Status column; actions: view, delete, remove blacklist)
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { visitorAPI } from '../../services/api';
@@ -18,7 +18,6 @@ const VisitorList = () => {
   const [totalPages, setTotalPages] = useState(1);
   const [actionLoading, setActionLoading] = useState(null);
 
-  // Fetch visitors (tolerant parsing)
   const fetchVisitors = async (s = search, page = currentPage) => {
     try {
       setLoading(true);
@@ -59,14 +58,10 @@ const VisitorList = () => {
     setCurrentPage(1);
   };
 
-  const handleBlacklist = async (id, isBlacklisted) => {
-    const reason = !isBlacklisted ? prompt('Reason for blacklisting (optional):') : '';
+  const handleUnblacklist = async (id) => {
     try {
       setActionLoading(id);
-      await visitorAPI.toggleBlacklist(id, {
-        isBlacklisted: !isBlacklisted,
-        blacklistReason: reason
-      });
+      await visitorAPI.toggleBlacklist(id, { isBlacklisted: false });
       await fetchVisitors();
     } catch (error) {
       console.error('Error updating blacklist:', error);
@@ -106,7 +101,6 @@ const VisitorList = () => {
           </button>
 
           {(user?.role === 'admin' || user?.role === 'security') && (
-            // use navigate to avoid full page reload
             <button type="button" onClick={goToRegister} className="btn-primary">
               ➕ Register New Visitor
             </button>
@@ -132,14 +126,13 @@ const VisitorList = () => {
               <th>Phone</th>
               <th>Company</th>
               <th>Visit Count</th>
-              <th>Status</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
             {(!visitors || visitors.length === 0) ? (
               <tr>
-                <td colSpan={7} style={{ textAlign: 'center' }}>No visitors found</td>
+                <td colSpan={6} style={{ textAlign: 'center' }}>No visitors found</td>
               </tr>
             ) : (
               visitors.map((visitor) => {
@@ -153,47 +146,30 @@ const VisitorList = () => {
                     <td>{visitor?.company || 'N/A'}</td>
                     <td>{typeof visitor?.visitCount === 'number' ? visitor.visitCount : '0'}</td>
                     <td>
-                      {visitor?.isBlacklisted ? (
-                        <span className="badge badge-red">Blacklisted</span>
-                      ) : (
-                        <span className="badge badge-green">Active</span>
-                      )}
-                    </td>
-                    <td>
                       <div className="action-buttons">
-                        {/* SPA navigation to visitor detail */}
-                        <button
-                          type="button"
-                          className="btn-icon"
-                          title="View"
-                          onClick={() => navigate(`/visitors/${id}`)}
-                        >
-                          👁️
-                        </button>
-
-                        {(user?.role === 'admin' || user?.role === 'security') && (
+                        {user?.role === 'admin' && (
                           <>
-                            <button
-                              type="button"
-                              onClick={() => handleBlacklist(id, visitor?.isBlacklisted)}
-                              className="btn-icon"
-                              title={visitor?.isBlacklisted ? 'Remove from blacklist' : 'Add to blacklist'}
-                              disabled={actionLoading === id}
-                            >
-                              {visitor?.isBlacklisted ? '✅' : '🚫'}
-                            </button>
-
-                            {user?.role === 'admin' && (
+                            {visitor?.isBlacklisted && (
                               <button
                                 type="button"
-                                onClick={() => handleDelete(id)}
-                                className="btn-icon btn-delete"
-                                title="Delete"
+                                onClick={() => handleUnblacklist(id)}
+                                className="btn-icon"
+                                title="Remove from blacklist"
                                 disabled={actionLoading === id}
                               >
-                                🗑️
+                                ✅
                               </button>
                             )}
+
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(id)}
+                              className="btn-icon btn-delete"
+                              title="Delete"
+                              disabled={actionLoading === id}
+                            >
+                              🗑️
+                            </button>
                           </>
                         )}
                       </div>

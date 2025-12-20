@@ -86,7 +86,7 @@ function App() {
           <Route
             path="/appointments/:id"
             element={
-              <RequireAuth allowed={['admin']}>
+              <RequireAuth allowed={['admin', 'employee']}>
                 <AppointmentDetail />
               </RequireAuth>
             }

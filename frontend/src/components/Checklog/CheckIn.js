@@ -324,18 +324,13 @@ const CheckIn = () => {
             </label>
           </div>
 
-          <div
-            id={scannerRegionId}
-            className='qr-viewer'
-            style={{
-              display: 'flex',
-              width: '320px',
-              height: '320px',
-              minWidth: '320px',
-              minHeight: '320px',
-              visibility: isCameraActive ? 'visible' : 'hidden'
-            }}
-          />
+          <div className='qr-preview-shell'>
+            <div
+              id={scannerRegionId}
+              className='qr-viewer'
+              style={{ visibility: isCameraActive ? 'visible' : 'hidden' }}
+            />
+          </div>
 
           <div id={`${scannerRegionId}-file`} style={{ display: 'none' }} />
 
