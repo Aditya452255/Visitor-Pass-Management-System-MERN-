@@ -1,0 +1,41 @@
+services:
+  # Backend Web Service
+  - type: web
+    name: visitor-pass-backend
+    runtime: node
+    region: oregon
+    plan: free
+    buildCommand: cd backend && npm install
+    startCommand: cd backend && npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: MONGO_URI
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false
+      - key: AUTO_CHECKOUT_AFTER_MIN
+        value: 60
+      - key: AUTO_CHECKOUT_INTERVAL_MIN
+        value: 5
+    healthCheckPath: /
+
+  # Frontend Static Site
+  - type: web
+    name: visitor-pass-frontend
+    runtime: static
+    region: oregon
+    buildCommand: cd frontend && npm install && npm run build
+    staticPublishPath: frontend/build
+    envVars:
+      - key: REACT_APP_API_URL
+        sync: false
+    headers:
+      - path: /*
+        name: X-Frame-Options
+        value: DENY
+      - path: /*
+        name: X-Content-Type-Options
+        value: nosniff
