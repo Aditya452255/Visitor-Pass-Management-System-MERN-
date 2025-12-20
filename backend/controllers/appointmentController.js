@@ -46,6 +46,8 @@ const createAppointment = async (req, res) => {
       hostId,
       appointmentDate, // ISO or date-only
       appointmentTime, // optional time HH:MM
+      duration,
+      purpose,
   
       location,
       notes
