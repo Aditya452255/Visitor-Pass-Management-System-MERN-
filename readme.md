@@ -4,7 +4,6 @@ A comprehensive full-stack web application for managing visitor passes, appointm
 
 ## 📹 Demo Videos
 - [Full Demo](https://www.loom.com/share/c948edb5c35241de88666786841485bd)
-- [Bug Fixes Demo](https://www.loom.com/share/88f976f2f7d4485f9d41a784b92c5eaa)
 
 ## 🏗️ Architecture
 
