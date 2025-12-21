@@ -1,7 +1,9 @@
 // Export data to CSV
+import { notifyError } from './notifications';
+
 export const exportToCSV = (data, filename) => {
   if (!data || data.length === 0) {
-    alert('No data to export');
+    notifyError('No data to export');
     return;
   }
 
@@ -43,7 +45,7 @@ export const exportToCSV = (data, filename) => {
 // Export data to JSON
 export const exportToJSON = (data, filename) => {
   if (!data || data.length === 0) {
-    alert('No data to export');
+    notifyError('No data to export');
     return;
   }
 

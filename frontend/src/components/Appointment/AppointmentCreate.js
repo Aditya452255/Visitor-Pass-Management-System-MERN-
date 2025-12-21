@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { appointmentAPI, visitorAPI, usersAPI } from '../../services/api'; // <- keep path consistent with other files
 import { useAuthContext } from '../../hooks/useAuthContext';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 import './Appointment.css';
 
 const AppointmentCreate = () => {
@@ -165,7 +166,7 @@ const AppointmentCreate = () => {
         throw res;
       }
 
-      alert('Appointment created successfully!');
+      notifySuccess('Appointment created successfully!');
       navigate('/appointments');
     } catch (err) {
       console.error('Create appointment error:', err);
@@ -176,6 +177,7 @@ const AppointmentCreate = () => {
         err?.message ||
         (typeof err === 'string' ? err : 'Failed to create appointment');
       setError(message);
+      notifyError(message);
     } finally {
       setLoading(false);
     }

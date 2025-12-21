@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { visitorAPI } from '../../services/api';
 import './Visitor.css';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const VisitorRegister = () => {
   const navigate = useNavigate();
@@ -89,12 +90,13 @@ const VisitorRegister = () => {
         throw res;
       }
 
-      alert('Visitor registered successfully!');
+      notifySuccess('Visitor registered successfully!');
       navigate('/visitors');
     } catch (err) {
       console.error('Registration error:', err);
       const message = err?.message || err?.error || 'Failed to register visitor';
       setError(message);
+      notifyError(message);
     } finally {
       setLoading(false);
     }

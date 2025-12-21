@@ -5,6 +5,7 @@ import { appointmentAPI } from '../../services/api';
 import { useAuthContext } from '../../hooks/useAuthContext';
 import Loader from '../Shared/Loader';
 import { format } from 'date-fns';
+import { notifySuccess, notifyError, notifyInfo } from '../../utils/notifications';
 import './Appointment.css';
 
 const AppointmentList = () => {
@@ -102,7 +103,7 @@ const AppointmentList = () => {
       try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
     })();
     if (!stored || (stored.role !== 'admin' && stored.role !== 'employee')) {
-      alert('Action blocked: current session token is not authorized to approve. Please login as admin/employee.');
+      notifyError('Action blocked: current session token is not authorized to approve. Please login as admin/employee.');
       return;
     }
 
@@ -110,12 +111,12 @@ const AppointmentList = () => {
       const res = await appointmentAPI.approve(id);
       // Optimistic update: reflect change immediately in the list
       setAppointments(prev => prev.map(a => (a._id === id || a.id === id) ? { ...a, status: res.status || 'approved', approvedBy: res.approvedBy || a.approvedBy } : a));
-      alert('Appointment approved successfully!');
+      notifySuccess('Appointment approved successfully!');
       // fetch fresh from server as well
       fetchAppointments(currentPage, filter);
     } catch (error) {
       console.error('Error approving appointment:', error);
-      alert(error?.message || 'Failed to approve appointment');
+      notifyError(error?.message || 'Failed to approve appointment');
     }
   };
 
@@ -126,18 +127,18 @@ const AppointmentList = () => {
         try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
       })();
       if (!stored || (stored.role !== 'admin' && stored.role !== 'employee')) {
-        alert('Action blocked: current session token is not authorized to reject. Please login as admin/employee.');
+        notifyError('Action blocked: current session token is not authorized to reject. Please login as admin/employee.');
         return;
       }
 
       try {
         const res = await appointmentAPI.reject(id, reason);
         setAppointments(prev => prev.map(a => (a._id === id || a.id === id) ? { ...a, status: res.status || 'rejected', rejectionReason: res.rejectionReason || reason } : a));
-        alert('Appointment rejected successfully!');
+        notifyInfo('Appointment rejected successfully!');
         fetchAppointments(currentPage, filter);
       } catch (error) {
         console.error('Error rejecting appointment:', error);
-        alert(error?.message || 'Failed to reject appointment');
+        notifyError(error?.message || 'Failed to reject appointment');
       }
     }
   };
@@ -148,25 +149,25 @@ const AppointmentList = () => {
         try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
       })();
       if (!stored) {
-        alert('Action blocked: please login to cancel.');
+        notifyError('Action blocked: please login to cancel.');
         return;
       }
 
       // Allow admin/employee; also allow visitor (backend will verify ownership)
       const role = stored.role;
       if (role !== 'admin' && role !== 'employee' && role !== 'visitor') {
-        alert('Action blocked: current session is not authorized to cancel appointments.');
+        notifyError('Action blocked: current session is not authorized to cancel appointments.');
         return;
       }
 
       try {
         const res = await appointmentAPI.cancel(id);
         setAppointments(prev => prev.map(a => (a._id === id || a.id === id) ? { ...a, status: res.status || 'cancelled' } : a));
-        alert('Appointment cancelled successfully!');
+        notifyInfo('Appointment cancelled successfully!');
         fetchAppointments(currentPage, filter);
       } catch (error) {
         console.error('Error cancelling appointment:', error);
-        alert(error?.message || 'Failed to cancel appointment');
+        notifyError(error?.message || 'Failed to cancel appointment');
       }
     }
   };

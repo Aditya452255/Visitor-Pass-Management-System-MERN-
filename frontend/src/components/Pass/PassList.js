@@ -5,6 +5,7 @@ import { useAuthContext } from '../../hooks/useAuthContext';
 import Loader from '../Shared/Loader';
 import { format } from 'date-fns';
 import './Pass.css';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const PassList = () => {
   const { user } = useAuthContext();
@@ -46,11 +47,11 @@ const PassList = () => {
     if (window.confirm('Are you sure you want to revoke this pass?')) {
       try {
         await passesAPI.revoke(id);
-        alert('Pass revoked successfully!');
+        notifySuccess('Pass revoked successfully!');
         fetchPasses(currentPage, filter);
       } catch (error) {
         console.error('Error revoking pass:', error);
-        alert('Failed to revoke pass');
+        notifyError('Failed to revoke pass');
       }
     }
   };

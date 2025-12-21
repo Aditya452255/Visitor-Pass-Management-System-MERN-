@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { passesAPI, visitorAPI, usersAPI } from '../../services/api';
 import './Pass.css';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const PassIssue = () => {
   const navigate = useNavigate();
@@ -113,13 +114,14 @@ const PassIssue = () => {
         throw res;
       }
 
-      alert('Pass issued successfully! Email sent to visitor.');
+      notifySuccess('Pass issued successfully! Email sent to visitor.');
       navigate('/passes');
     } catch (err) {
       // err might be an Error object or a response-like object
       const message = err?.message || err?.error || err?.msg || 'Failed to issue pass';
       setError(message);
       console.error('Issue pass error:', err);
+      notifyError(message);
     } finally {
       setLoading(false);
     }

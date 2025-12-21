@@ -6,6 +6,7 @@ import { useAuthContext } from '../../hooks/useAuthContext';
 import Loader from '../Shared/Loader';
 import './Visitor.css';
 import { exportToCSV, formatDataForExport } from '../../utils/exportUtils';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const VisitorList = () => {
   const { user } = useAuthContext();
@@ -47,9 +48,10 @@ const VisitorList = () => {
     try {
       const formattedData = formatDataForExport(visitors || []);
       exportToCSV(formattedData, `visitors-${new Date().toISOString().split('T')[0]}`);
+      notifySuccess('CSV exported successfully');
     } catch (err) {
       console.error('Export failed:', err);
-      alert('Failed to export CSV');
+      notifyError('Failed to export CSV');
     }
   };
 
@@ -62,10 +64,11 @@ const VisitorList = () => {
     try {
       setActionLoading(id);
       await visitorAPI.toggleBlacklist(id, { isBlacklisted: false });
+      notifySuccess('Visitor removed from blacklist');
       await fetchVisitors();
     } catch (error) {
       console.error('Error updating blacklist:', error);
-      alert('Failed to update blacklist status');
+      notifyError('Failed to update blacklist status');
     } finally {
       setActionLoading(null);
     }
@@ -76,10 +79,11 @@ const VisitorList = () => {
     try {
       setActionLoading(id);
       await visitorAPI.delete(id);
+      notifySuccess('Visitor deleted');
       await fetchVisitors();
     } catch (error) {
       console.error('Error deleting visitor:', error);
-      alert('Failed to delete visitor');
+      notifyError('Failed to delete visitor');
     } finally {
       setActionLoading(null);
     }

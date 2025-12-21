@@ -4,6 +4,7 @@ import { checkLogsAPI } from '../../services/api';
 import Loader from '../Shared/Loader';
 import { format } from 'date-fns';
 import './CheckLog.css';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const CheckLogList = () => {
   const [checkLogs, setCheckLogs] = useState([]);
@@ -61,7 +62,7 @@ const CheckLogList = () => {
     const notes = prompt('Add checkout notes (optional):');
     try {
       await checkLogsAPI.checkOut(id, notes || '');
-      alert('Visitor checked out successfully!');
+      notifySuccess('Visitor checked out successfully!');
       if (view === 'current') {
         fetchCurrentVisitors();
       } else {
@@ -69,7 +70,7 @@ const CheckLogList = () => {
       }
     } catch (error) {
       console.error('Error checking out visitor:', error);
-      alert('Failed to check out visitor');
+      notifyError('Failed to check out visitor');
     }
   };
 

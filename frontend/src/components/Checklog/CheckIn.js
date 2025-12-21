@@ -4,6 +4,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { checkLogsAPI, passesAPI } from '../../services/api';
 import { Html5Qrcode } from 'html5-qrcode';
 import './CheckLog.css';
+import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const CheckIn = () => {
   const navigate = useNavigate();
@@ -274,12 +275,13 @@ const CheckIn = () => {
       const res = await checkLogsAPI.checkIn(checkInData);
       if (res?.error || res?.success === false) throw res;
 
-      alert('Visitor checked in successfully!');
+      notifySuccess('Visitor checked in successfully!');
       navigate('/checklogs');
     } catch (err) {
       console.error('Check in error:', err);
       const message = err?.message || err?.error || err?.msg || 'Failed to check in visitor';
       setError(message);
+      notifyError(message);
     } finally {
       setLoading(false);
     }
