@@ -63,7 +63,25 @@ const PORT = process.env.PORT || 5000; // ✅ fallback
 
 mongoose.connect(process.env.MONGO_URI)
   .then(() => {
-    app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+    app.listen(PORT, () => {
+      console.log(`✅ Server running on port ${PORT}`);
+      
+      // Verify email configuration on startup
+      console.log('\n=== Email Configuration Check ===');
+      console.log('EMAIL_SERVICE:', process.env.EMAIL_SERVICE || '❌ NOT SET');
+      console.log('EMAIL_USER:', process.env.EMAIL_USER || '❌ NOT SET');
+      console.log('EMAIL_PASS:', process.env.EMAIL_PASS ? '✓ SET (hidden)' : '❌ NOT SET');
+      
+      if (!process.env.EMAIL_SERVICE || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+        console.log('⚠️  WARNING: Email service not fully configured!');
+        console.log('   Appointment confirmations and QR codes will NOT be sent.');
+        console.log('   See EMAIL_TROUBLESHOOTING.md for setup instructions.');
+      } else {
+        console.log('✓ Email service configuration detected');
+        console.log('  Note: Use /api/auth/test-email to verify it works');
+      }
+      console.log('================================\n');
+    });
 
     // Auto-checkout scheduler: sets checkOutTime to checkInTime + MAX_DURATION
     const MAX_DURATION_MIN = Number(process.env.AUTO_CHECKOUT_AFTER_MIN || 60); // default 60 min

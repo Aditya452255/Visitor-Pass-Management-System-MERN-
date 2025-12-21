@@ -1,12 +1,29 @@
 const nodemailer = require('nodemailer');
 const { path } = require('pdfkit');
 
+// Verify email configuration on startup
+if (!process.env.EMAIL_SERVICE || !process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
+    console.error('[EmailService] CRITICAL: Missing email configuration in environment variables!');
+    console.error('[EmailService] EMAIL_SERVICE:', process.env.EMAIL_SERVICE ? 'SET' : 'MISSING');
+    console.error('[EmailService] EMAIL_USER:', process.env.EMAIL_USER ? 'SET' : 'MISSING');
+    console.error('[EmailService] EMAIL_PASS:', process.env.EMAIL_PASS ? 'SET (hidden)' : 'MISSING');
+}
+
 const transporter = nodemailer.createTransport({
     service: process.env.EMAIL_SERVICE,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
+});
+
+// Verify transporter configuration on startup
+transporter.verify(function (error, success) {
+    if (error) {
+        console.error('[EmailService] Transporter verification failed:', error);
+    } else {
+        console.log('[EmailService] Email transporter is ready to send messages');
+    }
 });
 
 const sendEmail = async (to, subject, html) => {
@@ -28,7 +45,15 @@ const sendEmail = async (to, subject, html) => {
 };
 
 const sendAppointmentConfirmation = async (appointment, visitor, host, qrCodeDataURL) => {
+    console.log('[EmailService] sendAppointmentConfirmation called');
+    console.log('[EmailService] Visitor email:', visitor?.email);
+    console.log('[EmailService] Host name:', host?.name);
+    console.log('[EmailService] QR Code provided:', !!qrCodeDataURL);
     
+    if (!visitor || !visitor.email) {
+        console.error('[EmailService] Cannot send email: visitor or visitor email is missing');
+        throw new Error('Visitor email is required');
+    }
 
     const html = `
         <h2>Appointment Confirmation</h2>
@@ -87,16 +112,24 @@ const sendAppointmentConfirmation = async (appointment, visitor, host, qrCodeDat
             }
         }
 
+        console.log('[EmailService] Attempting to send email to:', mailOptions.to);
+        console.log('[EmailService] Email subject:', mailOptions.subject);
+        console.log('[EmailService] Attachments count:', mailOptions.attachments.length);
+        
         const info = await transporter.sendMail(mailOptions);
+        console.log('[EmailService] ✓ Email sent successfully! Message ID:', info.messageId);
+        console.log('[EmailService] Response:', info.response);
         return true;
     } catch (error) {
-        console.error('[EmailService] CRITICAL: Error sending appointment confirmation email:', error);
+        console.error('[EmailService] ✗ CRITICAL: Error sending appointment confirmation email:', error.message);
+        console.error('[EmailService] Error code:', error.code);
+        console.error('[EmailService] Error command:', error.command);
         try {
             console.error('[EmailService] Mail Options at time of error:', JSON.stringify({
                 to: mailOptions.to,
                 subject: mailOptions.subject,
                 attachments: mailOptions.attachments.map(a => ({ filename: a.filename, path: a.path || null, hasContent: !!a.content }))
-            }, null, 2)); // Log the mail options for debugging
+            }, null, 2));
         } catch (e) {
             console.error('[EmailService] Failed to serialize mail options for logging', e);
         }

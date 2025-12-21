@@ -428,45 +428,59 @@ const approveAppointment = async (req, res) => {
     appointment.approvalDate = new Date();
     await appointment.save();
 
+    // Track notification success
+    let emailSent = false;
+    let smsSent = false;
+
     // Send confirmation email + SMS (best-effort) only if visitor contact exists
-    try {
-      if (appointment.visitor && appointment.visitor.email) {
-        console.log(`[Approve] Visitor has email (${appointment.visitor.email}). Preparing to send confirmation.`);
+    if (appointment.visitor && appointment.visitor.email) {
+      console.log(`[Approve] Visitor has email (${appointment.visitor.email}). Preparing to send confirmation.`);
+      try {
         // Generate QR code for the appointment details
+        console.log(`[Approve] Generating QR code for appointment ${id}...`);
         const qrCodeDataURL = await generateQRCode({
           appointmentId: appointment._id,
           visitorId: appointment.visitor._id,
           hostId: appointment.host._id,
           date: appointment.appointmentDate,
         });
-        console.log(`[Approve] QR Code generated. Sending email...`);
+        console.log(`[Approve] ✓ QR Code generated successfully`);
+        
+        console.log(`[Approve] Sending email to ${appointment.visitor.email}...`);
         await sendAppointmentConfirmation(appointment, appointment.visitor, appointment.host, qrCodeDataURL);
-        console.log(`[Approve] Email sending process completed for appointment ID: ${id}`);
-      } else {
-        console.log(`[Approve] Skipping email for appointment ID: ${id}. Visitor has no email address.`);
+        console.log(`[Approve] ✓ Email sent successfully for appointment ID: ${id}`);
+        emailSent = true;
+      } catch (e) {
+        console.error(`[Approve] ✗ FAILED to send appointment confirmation email for ID: ${id}`);
+        console.error(`[Approve] Error details:`, e?.message || e);
+        console.error(`[Approve] Error stack:`, e?.stack);
+        // Don't throw - continue with SMS and response
       }
-    } catch (e) {
-      console.error(`[Approve] Failed to send appointment confirmation email for ID: ${id}. Error:`, e?.message || e);
+    } else {
+      console.log(`[Approve] Skipping email for appointment ID: ${id}. Visitor: ${appointment.visitor ? 'exists' : 'MISSING'}, Email: ${appointment.visitor?.email || 'MISSING'}`);
     }
 
-    try {
-      if (appointment.visitor && appointment.visitor.phone) {
-        console.log(`[Approve] Visitor has phone number. Sending SMS...`);
+    if (appointment.visitor && appointment.visitor.phone) {
+      console.log(`[Approve] Visitor has phone number. Sending SMS...`);
+      try {
         await sendAppointmentSMS(appointment.visitor.phone, {
           date: new Date(appointment.appointmentDate).toLocaleDateString(),
           time: appointment.appointmentTime,
           location: appointment.location,
           host: appointment.host?.name || ''
         });
-        console.log(`[Approve] SMS sending process completed for appointment ID: ${id}`);
+        console.log(`[Approve] ✓ SMS sent successfully for appointment ID: ${id}`);
+        smsSent = true;
+      } catch (e) {
+        console.warn(`[Approve] ✗ Failed to send appointment SMS for ID: ${id}. Error:`, e?.message || e);
       }
-    } catch (e) {
-      console.warn(`[Approve] Failed to send appointment SMS for ID: ${id}. Error:`, e?.message || e);
     }
 
-    // mark as notificationsSent (model has notificationsSent)
-    appointment.notificationsSent = true;
+    // Only mark as notificationsSent if at least email was sent
+    appointment.notificationsSent = emailSent;
     await appointment.save();
+    
+    console.log(`[Approve] Notification status - Email: ${emailSent ? '✓' : '✗'}, SMS: ${smsSent ? '✓' : '✗'}`);
 
     // Auto-issue an active pass linked to this appointment if none exists
     try {
@@ -496,7 +510,14 @@ const approveAppointment = async (req, res) => {
       console.warn(`[Approve] Auto-issue pass skipped due to error:`, e?.message || e);
     }
 
-    return res.status(200).json(appointment);
+    return res.status(200).json({
+      ...appointment.toObject(),
+      _notificationStatus: {
+        emailSent,
+        smsSent,
+        message: emailSent ? 'Appointment approved and email sent with QR code' : 'Appointment approved but email failed to send - check logs'
+      }
+    });
   } catch (err) {
     console.error(`[Approve] Critical error during approval for ID: ${id}. Error:`, err);
     return res.status(500).json({ error: err.message });
