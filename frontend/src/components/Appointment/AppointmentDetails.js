@@ -221,7 +221,7 @@ const AppointmentDetail = () => {
             {visitorPhoto ? (
               <img 
                 src={toAbsoluteUrl(visitorPhoto)} 
-                alt="Visitor passport photo"
+                alt="Visitor identification"
                 onError={(e) => {
                   e.target.style.display = 'none';
                   if (e.target.parentElement) {

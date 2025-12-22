@@ -4,7 +4,6 @@ import { checkLogsAPI } from '../../services/api';
 import Loader from '../Shared/Loader';
 import { format } from 'date-fns';
 import './CheckLog.css';
-import { notifySuccess, notifyError } from '../../utils/notifications';
 
 const CheckLogList = () => {
   const [checkLogs, setCheckLogs] = useState([]);
@@ -55,24 +54,6 @@ const CheckLogList = () => {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, currentPage]);
-
-  // Note: handleCheckOut not currently used in UI - reserved for future checkout feature
-  // eslint-disable-next-line no-unused-vars
-  const handleCheckOut = async (id) => {
-    const notes = prompt('Add checkout notes (optional):');
-    try {
-      await checkLogsAPI.checkOut(id, notes || '');
-      notifySuccess('Visitor checked out successfully!');
-      if (view === 'current') {
-        fetchCurrentVisitors();
-      } else {
-        fetchCheckLogs(currentPage);
-      }
-    } catch (error) {
-      console.error('Error checking out visitor:', error);
-      notifyError('Failed to check out visitor');
-    }
-  };
 
   const calculateDuration = (checkInTime, checkOutTime) => {
     if (!checkOutTime) return 'In Progress';

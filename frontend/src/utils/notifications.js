@@ -19,8 +19,10 @@ export const notifyError = (message, options = {}) =>
 export const notifyInfo = (message, options = {}) =>
   toast.info(message || 'Notice', { ...baseOptions, ...options });
 
-export default {
+const notifications = {
   notifySuccess,
   notifyError,
   notifyInfo
 };
+
+export default notifications;
