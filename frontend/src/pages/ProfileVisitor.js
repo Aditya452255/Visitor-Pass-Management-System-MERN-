@@ -6,8 +6,10 @@ import Loader from '../components/Shared/Loader';
 const ProfileVisitor = () => {
   const { user, login } = useAuthContext();
   const [form, setForm] = useState({ name: '', email: '', phone: '', role: '' });
+  const [originalForm, setOriginalForm] = useState({ name: '', email: '', phone: '', role: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -20,12 +22,14 @@ const ProfileVisitor = () => {
         setLoading(true);
         const data = await authAPI.getProfile();
         if (!mounted) return;
-        setForm({
+        const profileData = {
           name: data?.name || '',
           email: data?.email || '',
           phone: data?.phone || '',
           role: (data?.role || '').toLowerCase()
-        });
+        };
+        setForm(profileData);
+        setOriginalForm(profileData);
       } catch (e) {
         if (!mounted) return;
         setError(e?.message || 'Failed to load profile');
@@ -68,11 +72,28 @@ const ProfileVisitor = () => {
         const merged = { ...stored, name: updated.name, email: updated.email };
         login(merged);
       } catch (_) { /* ignore */ }
+      // Update original form and exit edit mode
+      const updatedData = { ...form };
+      setOriginalForm(updatedData);
+      setIsEditing(false);
     } catch (e) {
       setError(e?.message || 'Failed to update profile');
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleEdit = () => {
+    setError('');
+    setSuccess('');
+    setIsEditing(true);
+  };
+
+  const handleCancel = () => {
+    setForm({ ...originalForm });
+    setError('');
+    setSuccess('');
+    setIsEditing(false);
   };
 
   if (!isVisitor) {
@@ -89,28 +110,103 @@ const ProfileVisitor = () => {
   return (
     <div style={{ maxWidth: 520, margin: '0 auto', padding: 16 }}>
       <h2>My Profile</h2>
-      {error && <div style={{ color: 'crimson', marginBottom: 12 }}>{error}</div>}
-      {success && <div style={{ color: 'green', marginBottom: 12 }}>{success}</div>}
+      {error && <div style={{ color: 'crimson', marginBottom: 12, padding: '10px', backgroundColor: '#fee', borderRadius: '4px' }}>{error}</div>}
+      {success && <div style={{ color: 'green', marginBottom: 12, padding: '10px', backgroundColor: '#efe', borderRadius: '4px' }}>{success}</div>}
       <form onSubmit={onSubmit}>
         <div className="form-group">
           <label htmlFor="name">Name</label>
-          <input id="name" name="name" type="text" value={form.name} onChange={onChange} />
+          <input 
+            id="name" 
+            name="name" 
+            type="text" 
+            value={form.name} 
+            onChange={onChange}
+            disabled={!isEditing}
+            style={{ 
+              backgroundColor: !isEditing ? '#f5f5f5' : 'white',
+              cursor: !isEditing ? 'not-allowed' : 'text'
+            }}
+          />
         </div>
         <div className="form-group">
           <label htmlFor="email">Email</label>
-          <input id="email" name="email" type="email" value={form.email} onChange={onChange} />
+          <input 
+            id="email" 
+            name="email" 
+            type="email" 
+            value={form.email} 
+            onChange={onChange}
+            disabled={!isEditing}
+            style={{ 
+              backgroundColor: !isEditing ? '#f5f5f5' : 'white',
+              cursor: !isEditing ? 'not-allowed' : 'text'
+            }}
+          />
         </div>
         <div className="form-group">
           <label htmlFor="phone">Phone</label>
-          <input id="phone" name="phone" type="text" value={form.phone} onChange={onChange} />
+          <input 
+            id="phone" 
+            name="phone" 
+            type="text" 
+            value={form.phone} 
+            onChange={onChange}
+            disabled={!isEditing}
+            style={{ 
+              backgroundColor: !isEditing ? '#f5f5f5' : 'white',
+              cursor: !isEditing ? 'not-allowed' : 'text'
+            }}
+          />
         </div>
         <div className="form-group">
           <label htmlFor="role">Role</label>
-          <input id="role" name="role" type="text" value={form.role} readOnly />
+          <input 
+            id="role" 
+            name="role" 
+            type="text" 
+            value={form.role} 
+            readOnly
+            disabled
+            style={{ 
+              backgroundColor: '#f5f5f5',
+              cursor: 'not-allowed'
+            }}
+          />
         </div>
-        <button className="btn-primary" type="submit" disabled={saving}>
-          {saving ? 'Updating…' : 'Update Profile'}
-        </button>
+        {!isEditing ? (
+          <button 
+            className="btn-primary" 
+            onClick={handleEdit}
+            type="button"
+            style={{ marginTop: '20px', width: '100%' }}
+          >
+            Edit Profile
+          </button>
+        ) : (
+          <div style={{ display: 'flex', gap: '12px', marginTop: '20px' }}>
+            <button className="btn-primary" type="submit" disabled={saving} style={{ flex: 1 }}>
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button 
+              type="button" 
+              onClick={handleCancel}
+              disabled={saving}
+              style={{ 
+                flex: 1,
+                backgroundColor: '#6c757d', 
+                color: 'white',
+                border: 'none',
+                padding: '10px 20px',
+                borderRadius: '4px',
+                cursor: saving ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: '500'
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </form>
     </div>
   );

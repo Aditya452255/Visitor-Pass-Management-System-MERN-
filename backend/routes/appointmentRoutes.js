@@ -10,6 +10,7 @@ const {
   approveAppointment,
   rejectAppointment,
   cancelAppointment,
+  deleteAppointment,
   updateAppointment,
   getAppointmentStats
 } = require('../controllers/appointmentController'); // ✅ fixed typo
@@ -49,6 +50,9 @@ router.patch('/:id/reject', checkRole('admin', 'employee'), rejectAppointment);
 
 // Cancel appointment: allow admin/employee, and visitors to cancel their own appointments
 router.patch('/:id/cancel', checkRole('admin', 'employee', 'visitor'), cancelAppointment);
+
+// Delete appointment: allow admin/employee, and visitors to delete their own appointments
+router.delete('/:id', checkRole('admin', 'employee', 'visitor'), deleteAppointment);
 
 // Update appointment
 router.patch('/:id', updateAppointment);

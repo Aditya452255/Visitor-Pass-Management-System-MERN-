@@ -75,9 +75,16 @@ const CheckIn = () => {
 
       if (isValid) {
         setPass(receivedPass || null);
-        setVisitorPhoto(toAbsoluteUrl(result?.visitorPhoto || null));
+        // Try to get photo from multiple possible locations in the response
+        const photoUrl = receivedPass?.visitorPhoto || 
+            result?.visitorPhoto || 
+            receivedPass?.visitor?.photo || 
+            result?.visitor?.photo || 
+            null;
+        console.log('Photo URL extracted:', photoUrl, 'from result:', result);
+        setVisitorPhoto(toAbsoluteUrl(photoUrl));
         setError(null);
-      } else {
+     } else {
         let errMsg = result?.error || result?.message || 'Pass is not valid';
         if (typeof errMsg === 'object') {
           errMsg = errMsg?.message || JSON.stringify(errMsg);
@@ -287,6 +294,16 @@ const CheckIn = () => {
     }
   };
 
+  const handleRejectCheckIn = () => {
+    if (window.confirm('Are you sure you want to reject this visitor check-in?')) {
+      setPass(null);
+      setPassNumber('');
+      setVisitorPhoto(null);
+      setError(null);
+      notifySuccess('Check-in rejected. Form cleared.');
+    }
+  };
+
   return (
     <div className='checkin-page'>
       <div className='checkin-card'>
@@ -343,16 +360,16 @@ const CheckIn = () => {
 
       {pass && (
         <form onSubmit={handleSubmit}>
-          <div>
+          <div style={{ marginBottom: '1rem' }}>
             <strong>Visitor:</strong> {pass?.visitor?.name || 'N/A'}
           </div>
-          <div>
+          <div style={{ marginBottom: '1rem' }}>
             <strong>Valid Until:</strong> {pass?.validUntil ? new Date(pass.validUntil).toLocaleString() : 'N/A'}
           </div>
 
           {visitorPhoto && (
-            <div style={{ marginTop: '16px', textAlign: 'center', paddingTop: '16px', borderTop: '1px solid #ddd' }}>
-              <h3>Visitor Photo</h3>
+            <div style={{ marginTop: '16px', textAlign: 'center', paddingTop: '16px', borderTop: '1px solid #ddd', marginBottom: '1rem' }}>
+              <h3 style={{ margin: '0 0 1rem 0' }}>Visitor Photo</h3>
               <img
                 src={visitorPhoto}
                 alt="Visitor at check-in"
@@ -363,13 +380,24 @@ const CheckIn = () => {
                   border: '2px solid #3498db',
                   marginTop: '10px'
                 }}
-              />
+              onError={(e) => {
+                console.error('Photo load error:', visitorPhoto);
+                e.target.style.display = 'none';
+              }}
+            />
             </div>
           )}
 
           <div className="form-actions" style={{ marginTop: 16 }}>
             <button type='submit' disabled={loading}>
-              {loading ? 'Checking in...' : 'Check In Visitor'}
+              {loading ? 'Checking in...' : '✅ Check In Visitor'}
+            </button>
+            <button 
+              type='button' 
+              onClick={handleRejectCheckIn}
+              disabled={loading}
+            >
+              ❌ Reject Check In
             </button>
           </div>
         </form>

@@ -144,30 +144,30 @@ const AppointmentList = () => {
   };
 
   const handleCancel = async (id) => {
-    if (window.confirm('Are you sure you want to cancel this appointment?')) {
+    if (window.confirm('Are you sure you want to delete this appointment?')) {
       const stored = (() => {
         try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
       })();
       if (!stored) {
-        notifyError('Action blocked: please login to cancel.');
+        notifyError('Action blocked: please login to delete.');
         return;
       }
 
       // Allow admin/employee; also allow visitor (backend will verify ownership)
       const role = stored.role;
       if (role !== 'admin' && role !== 'employee' && role !== 'visitor') {
-        notifyError('Action blocked: current session is not authorized to cancel appointments.');
+        notifyError('Action blocked: current session is not authorized to delete appointments.');
         return;
       }
 
       try {
-        const res = await appointmentAPI.cancel(id);
-        setAppointments(prev => prev.map(a => (a._id === id || a.id === id) ? { ...a, status: res.status || 'cancelled' } : a));
-        notifyInfo('Appointment cancelled successfully!');
+        await appointmentAPI.delete(id);
+        setAppointments(prev => prev.filter(a => (a._id !== id && a.id !== id)));
+        notifyInfo('Appointment deleted successfully!');
         fetchAppointments(currentPage, filter);
       } catch (error) {
-        console.error('Error cancelling appointment:', error);
-        notifyError(error?.message || 'Failed to cancel appointment');
+        console.error('Error deleting appointment:', error);
+        notifyError(error?.message || 'Failed to delete appointment');
       }
     }
   };
@@ -318,9 +318,9 @@ const AppointmentList = () => {
                           <button
                             onClick={() => handleCancel(appointment._id || appointment.id)}
                             className="btn-icon btn-delete"
-                            title="Cancel"
+                            title="Delete"
                           >
-                            🚫
+                            🗑️
                           </button>
                         )}
                       </div>

@@ -647,6 +647,54 @@ const updateAppointment = async (req, res) => {
   }
 };
 
+// Delete appointment (permanently remove from database)
+const deleteAppointment = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const appointment = await Appointment.findById(id).populate('visitor').populate('host', 'name email');
+
+    if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
+
+    // Authorization: admin can delete any, employee can delete their own, visitor can delete their own
+    if (req.user && req.user.role === 'employee') {
+      const hostId = appointment.host?._id?.toString();
+      if (!hostId || hostId !== req.user._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: only the assigned host can delete' });
+      }
+    }
+
+    // Visitors can delete only their own appointments
+    if (req.user && req.user.role === 'visitor') {
+      const visitorDoc = await Visitor.findOne({ user: req.user._id });
+      const apptVisitorId = appointment.visitor?._id?.toString();
+      if (!visitorDoc || !apptVisitorId || apptVisitorId !== visitorDoc._id.toString()) {
+        return res.status(403).json({ error: 'Forbidden: only the appointment owner can delete' });
+      }
+    }
+
+    // Delete the appointment from the database
+    await Appointment.findByIdAndDelete(id);
+
+    // Send deletion notification (best-effort)
+    try {
+      const deletionEmail = `
+        <h2>Appointment Deleted</h2>
+        <p>The appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been deleted.</p>
+      `;
+      await sendEmail(appointment.visitor.email, 'Appointment Deleted', deletionEmail);
+      await sendEmail(appointment.host.email, 'Appointment Deleted', deletionEmail);
+    } catch (e) {
+      console.warn('Failed to send deletion emails:', e?.message || e);
+    }
+
+    return res.status(200).json({ message: 'Appointment deleted successfully' });
+  } catch (err) {
+    console.error('deleteAppointment error:', err);
+    return res.status(500).json({ error: err.message });
+  }
+};
+
 // Get appointment statistics
 const getAppointmentStats = async (req, res) => {
   try {
@@ -689,6 +737,7 @@ module.exports = {
   approveAppointment,
   rejectAppointment,
   cancelAppointment,
+  deleteAppointment,
   updateAppointment,
   getAppointmentStats
 };

@@ -221,6 +221,19 @@ export const appointmentAPI = {
     return data;
   },
 
+  delete: async (id) => {
+    const response = await fetch(`${API_URL}/appointments/${id}`, {
+      method: 'DELETE',
+      headers: getAuthHeaders()
+    });
+    const data = await parseResponse(response);
+    if (!response.ok) {
+      const err = (data && data.error) ? data.error : (typeof data === 'string' ? data : JSON.stringify(data));
+      throw new Error(err);
+    }
+    return data;
+  },
+
   getStats: async () => {
     const response = await fetch(`${API_URL}/appointments/stats`, {
       headers: getAuthHeaders()

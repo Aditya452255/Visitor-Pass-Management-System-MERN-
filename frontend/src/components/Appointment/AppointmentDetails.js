@@ -103,25 +103,25 @@ const AppointmentDetail = () => {
   };
 
   const handleCancel = async () => {
-    if (window.confirm('Cancel this appointment?')) {
+    if (window.confirm('Delete this appointment?')) {
       const stored = (() => {
         try { return JSON.parse(localStorage.getItem('user')) || null; } catch (e) { return null; }
       })();
-      if (!stored || (stored.role !== 'admin' && stored.role !== 'employee')) {
-        notifyError('Action blocked: current session token is not authorized to cancel. Please login as admin/employee.');
+      if (!stored || (stored.role !== 'admin' && stored.role !== 'employee' && stored.role !== 'visitor')) {
+        notifyError('Action blocked: current session token is not authorized to delete. Please login as admin/employee/visitor.');
         return;
       }
       if (stored.role === 'employee' && effectiveUserId && appointment?.host?._id && appointment.host._id.toString() !== effectiveUserId.toString()) {
-        notifyError('Action blocked: only the assigned host can cancel this appointment.');
+        notifyError('Action blocked: only the assigned host can delete this appointment.');
         return;
       }
       try {
-        await appointmentAPI.cancel(id);
-        notifyInfo('Appointment cancelled.');
-        fetchAppointment();
+        await appointmentAPI.delete(id);
+        notifyInfo('Appointment deleted.');
+        navigate('/appointments');
       } catch (err) {
-        console.error('Error cancelling appointment:', err);
-        notifyError(err?.message || 'Failed to cancel appointment.');
+        console.error('Error deleting appointment:', err);
+        notifyError(err?.message || 'Failed to delete appointment.');
       }
     }
   };
@@ -139,7 +139,7 @@ const AppointmentDetail = () => {
   }
   if (!appointment) return null;
 
-  const { visitor, host, purpose, location, status, appointmentDate, appointmentTime, notes } =
+  const { visitor, host, purpose, location, status, appointmentDate, appointmentTime, notes, visitorPhoto } =
     appointment;
 
   const formattedDate = appointmentDate
@@ -147,59 +147,95 @@ const AppointmentDetail = () => {
     : 'N/A';
   const formattedTime = appointmentTime || (appointmentDate ? new Date(appointmentDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'N/A');
 
+  // Helper function to convert relative path to absolute URL
+  const toAbsoluteUrl = (path) => {
+    if (!path) return null;
+    const str = String(path);
+    if (/^https?:\/\//i.test(str)) return str;
+    const baseApi = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+    const base = baseApi.replace(/\/api\/?$/, '');
+    const normalized = str.startsWith('/') ? str : `/${str}`;
+    return `${base}${normalized}`;
+  };
+
   return (
     <div className="appointment-detail-container">
       <div className="detail-card">
-        <h2>Appointment Details</h2>
-        <div className="detail-row">
-          <strong>Visitor:</strong> {visitor?.name || 'N/A'} ({visitor?.email || '—'})
-        </div>
-        <div className="detail-row">
-          <strong>Host:</strong> {host?.name || 'N/A'} ({host?.department || '—'})
-        </div>
-        <div className="detail-row">
-          <strong>Date & Time:</strong> {formattedDate} at {formattedTime}
-        </div>
-        <div className="detail-row">
-          <strong>Purpose:</strong> {purpose || '—'}
-        </div>
-        <div className="detail-row">
-          <strong>Location:</strong> {location || '—'}
-        </div>
-        <div className="detail-row">
-          <strong>Status:</strong>{' '}
-          <span className={`badge badge-${status}`}>{status?.toUpperCase()}</span>
-        </div>
-        {notes && (
+        <div className="detail-content">
+          <h2>Appointment Details</h2>
           <div className="detail-row">
-            <strong>Notes:</strong> {notes}
+            <strong>Visitor:</strong> {visitor?.name || 'N/A'} ({visitor?.email || '—'})
           </div>
-        )}
-
-        <div className="actions">
-          <button className="btn-secondary" onClick={() => navigate('/appointments')}>
-            ← Back
-          </button>
-
-          {(effectiveRole === 'admin' || (effectiveRole === 'employee' && effectiveUserId && appointment?.host?._id && appointment.host._id.toString() === effectiveUserId.toString())) && (
-            <>
-              {status === 'pending' && (
-                <>
-                  <button className="btn-green" onClick={handleApprove}>
-                    ✅ Approve
-                  </button>
-                  <button className="btn-red" onClick={handleReject}>
-                    ❌ Reject
-                  </button>
-                </>
-              )}
-              {status !== 'cancelled' && status !== 'rejected' && (
-                <button className="btn-orange" onClick={handleCancel}>
-                  🚫 Cancel
-                </button>
-              )}
-            </>
+          <div className="detail-row">
+            <strong>Host:</strong> {host?.name || 'N/A'} ({host?.department || '—'})
+          </div>
+          <div className="detail-row">
+            <strong>Date &amp; Time:</strong> {formattedDate} at {formattedTime}
+          </div>
+          <div className="detail-row">
+            <strong>Purpose:</strong> {purpose || '—'}
+          </div>
+          <div className="detail-row">
+            <strong>Location:</strong> {location || '—'}
+          </div>
+          <div className="detail-row">
+            <strong>Status:</strong>{' '}
+            <span className={`badge badge-${status}`}>{status?.toUpperCase()}</span>
+          </div>
+          {notes && (
+            <div className="detail-row">
+              <strong>Notes:</strong> {notes}
+            </div>
           )}
+
+          <div className="actions">
+            <button className="btn-secondary" onClick={() => navigate('/appointments')}>
+              ← Back
+            </button>
+
+            {(effectiveRole === 'admin' || (effectiveRole === 'employee' && effectiveUserId && appointment?.host?._id && appointment.host._id.toString() === effectiveUserId.toString())) && (
+              <>
+                {status === 'pending' && (
+                  <>
+                    <button className="btn-green" onClick={handleApprove}>
+                      ✅ Approve
+                    </button>
+                    <button className="btn-red" onClick={handleReject}>
+                      ❌ Reject
+                    </button>
+                  </>
+                )}
+                {status !== 'cancelled' && status !== 'rejected' && (
+                  <button className="btn-orange" onClick={handleCancel}>
+                    🗑️ Delete
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+
+        <div className="detail-photo-section">
+          <h3>Visitor Photo</h3>
+          <div className="visitor-photo-container">
+            {visitorPhoto ? (
+              <img 
+                src={toAbsoluteUrl(visitorPhoto)} 
+                alt="Visitor passport photo"
+                onError={(e) => {
+                  e.target.style.display = 'none';
+                  if (e.target.parentElement) {
+                    const placeholder = document.createElement('div');
+                    placeholder.className = 'visitor-photo-placeholder';
+                    placeholder.textContent = 'No photo provided';
+                    e.target.parentElement.appendChild(placeholder);
+                  }
+                }}
+              />
+            ) : (
+              <div className="visitor-photo-placeholder">No photo provided</div>
+            )}
+          </div>
         </div>
       </div>
     </div>
