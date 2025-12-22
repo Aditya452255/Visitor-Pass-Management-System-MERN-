@@ -304,7 +304,7 @@ const AppointmentCreate = () => {
               <div style={{ marginTop: '10px', textAlign: 'center' }}>
                 <img
                   src={photoPreview}
-                  alt="Visitor preview"
+                  alt="Visitor preview portrait"
                   style={{
                     maxWidth: '150px',
                     maxHeight: '150px',

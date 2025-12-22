@@ -372,7 +372,7 @@ const CheckIn = () => {
               <h3 style={{ margin: '0 0 1rem 0' }}>Visitor Photo</h3>
               <img
                 src={visitorPhoto}
-                alt="Visitor at check-in"
+                alt="Visitor identity at check-in"
                 style={{
                   maxWidth: '200px',
                   maxHeight: '250px',
