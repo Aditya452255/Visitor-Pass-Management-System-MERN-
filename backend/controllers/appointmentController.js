@@ -237,6 +237,9 @@ const createAppointmentPublic = async (req, res) => {
       ? appointmentTime
       : appointmentDateObj.toTimeString().slice(0, 5);
 
+    // Use uploaded photo if provided (Cloudinary secure_url)
+    const photoPath = req.file ? req.file.secure_url : null;
+
     const newAppointment = await Appointment.create({
       visitor: visitor ? visitor._id : undefined,
       host: host._id,
@@ -246,6 +249,7 @@ const createAppointmentPublic = async (req, res) => {
       purpose,
       location,
       notes,
+      visitorPhoto: photoPath,
       status: 'pending'
     });
 

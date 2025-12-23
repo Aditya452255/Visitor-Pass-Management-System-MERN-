@@ -19,8 +19,8 @@ const auth = require('../middleware/auth');
 const checkRole = require('../middleware/roleCheck');
 const uploadPhotoCloudinary = require('../middleware/uploadPhotoCloudinary');
 
-// Public endpoint for visitors to create appointment requests
-router.post('/public', createAppointmentPublic);
+// Public endpoint for visitors to create appointment requests (with photo upload)
+router.post('/public', uploadPhotoCloudinary.single('visitorPhoto'), createAppointmentPublic);
 // Public endpoint for visitors to fetch their appointments (status checks)
 router.get('/visitor/:visitorId', getAppointmentsByVisitor);
 
