@@ -14,16 +14,16 @@ const {
 
 const auth = require('../middleware/auth');
 const checkRole = require('../middleware/roleCheck');
-const upload = require('../middleware/upload');
+const uploadVisitorPhotoCloudinary = require('../middleware/uploadVisitorPhotoCloudinary');
 
 // Public pre-registration (no auth required)
-router.post('/register', upload.single('photo'), registerVisitorPublic);
+router.post('/register', uploadVisitorPhotoCloudinary.single('photo'), registerVisitorPublic);
 
 // All other visitor routes require authentication
 router.use(auth);
 
 // Register a new visitor (accessible by security and admin)
-router.post('/', checkRole('admin', 'security'), upload.single('photo'), registerVisitor);
+router.post('/', checkRole('admin', 'security'), uploadVisitorPhotoCloudinary.single('photo'), registerVisitor);
 
 // Get all visitors (accessible by security and admin)
 router.get('/', getAllVisitors);
@@ -35,7 +35,7 @@ router.get('/stats', checkRole('admin'), getVisitorStats);
 router.get('/:id', getVisitor);
 
 // Update visitor details (accessible by security and admin)
-router.patch('/:id', checkRole('admin', 'security'), upload.single('photo'), updateVisitor);
+router.patch('/:id', checkRole('admin', 'security'), uploadVisitorPhotoCloudinary.single('photo'), updateVisitor);
 
 // Toggle blacklist status (admin only)
 router.patch('/:id/blacklist', checkRole('admin'), toggleBlacklist);

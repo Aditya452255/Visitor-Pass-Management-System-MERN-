@@ -40,7 +40,7 @@ const registerVisitor = async (req, res) => {
       address,
       purpose,
       vehicleNumber,
-      photo: req.file.path,
+      photo: req.file?.secure_url || req.file?.path || null,
       visitCount: 1,
       lastVisit: new Date()
     });
@@ -86,11 +86,7 @@ const registerVisitorPublic = async (req, res) => {
 
       // Replace photo
       if (req.file) {
-        const photoPath = req.file.path;
-        // delete old photo if exists
-        if (visitor.photo && fs.existsSync(path.join(__dirname, '..', visitor.photo))) {
-          fs.unlinkSync(path.join(__dirname, '..', visitor.photo));
-        }
+        const photoPath = req.file?.secure_url || req.file?.path || null;
         visitor.photo = photoPath;
         visitor.user = userDoc._id;
       }
@@ -109,7 +105,7 @@ const registerVisitorPublic = async (req, res) => {
         address,
         purpose,
         vehicleNumber,
-        photo: req.file.path,
+        photo: req.file?.secure_url || req.file?.path || null,
         visitCount: 1,
         lastVisit: new Date()
       });

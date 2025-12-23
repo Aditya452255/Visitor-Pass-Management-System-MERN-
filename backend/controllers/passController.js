@@ -348,7 +348,11 @@ const verifyPass = async (req, res) => {
     const normalizePhotoPath = (p) => {
       if (!p) return null;
       let rel = String(p).trim();
-      if (/^https?:\/\//i.test(rel)) return rel; // already absolute
+      if (/^https?:\/\//i.test(rel)) return rel; // already absolute URL
+      // Ignore absolute filesystem paths (e.g., C:\... or /var/...)
+      if (/^[a-zA-Z]:\\/.test(rel) || rel.startsWith('\\') || rel.startsWith('/var/') || rel.startsWith('/tmp/')) {
+        return null;
+      }
       if (!rel.startsWith('/uploads/')) {
         if (rel.startsWith('uploads/')) rel = `/${rel}`;
         else rel = `/uploads/${rel.replace(/^\/+/, '')}`;
@@ -356,11 +360,15 @@ const verifyPass = async (req, res) => {
       return rel;
     };
 
-    // Return pass with appointment photo for check-in verification
+    // Normalize visitor photo (may come from visitor profile if appointment photo missing)
+    const visitorPhotoNormalized = normalizePhotoPath(pass?.visitor?.photo);
+    const appointmentPhotoNormalized = normalizePhotoPath(appointmentDetails?.visitorPhoto);
+
+    // Return pass with best-available photo for check-in verification
     const response = {
       valid: true,
       pass,
-      visitorPhoto: normalizePhotoPath(appointmentDetails?.visitorPhoto)
+      visitorPhoto: appointmentPhotoNormalized || visitorPhotoNormalized
     };
 
     res.status(200).json(response);
