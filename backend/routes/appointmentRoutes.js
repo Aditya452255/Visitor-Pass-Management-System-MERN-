@@ -17,7 +17,7 @@ const {
 
 const auth = require('../middleware/auth');
 const checkRole = require('../middleware/roleCheck');
-const uploadPhoto = require('../middleware/uploadPhoto');
+const uploadPhotoCloudinary = require('../middleware/uploadPhotoCloudinary');
 
 // Public endpoint for visitors to create appointment requests
 router.post('/public', createAppointmentPublic);
@@ -31,7 +31,7 @@ router.use(auth);
 router.get('/my', require('../middleware/auth'), require('../controllers/appointmentController').getMyAppointments);
 
 // Create appointment with photo upload (authenticated users)
-router.post('/', uploadPhoto.single('visitorPhoto'), createAppointment);
+router.post('/', uploadPhotoCloudinary.single('visitorPhoto'), createAppointment);
 
 // Get appointments
 router.get('/', checkRole('admin', 'employee'), getAllAppointments);

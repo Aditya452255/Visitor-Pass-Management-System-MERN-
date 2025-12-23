@@ -138,8 +138,8 @@ const createAppointment = async (req, res) => {
       ? appointmentTime
       : appointmentDateObj.toTimeString().slice(0, 5); // "HH:MM"
 
-    // Prepare photo path for storage (ensure it starts with /uploads for public access)
-    const photoPath = req.file ? `/uploads/appointment-photos/${req.file.filename}` : null;
+    // Prepare photo path for storage (use Cloudinary URL if file was uploaded)
+    const photoPath = req.file ? req.file.secure_url : null;
 
     const newAppointment = await Appointment.create({
       visitor: visitor ? visitor._id : undefined,

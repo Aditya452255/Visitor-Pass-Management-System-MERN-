@@ -34,6 +34,13 @@ services:
         sync: false
       - key: TWILIO_PHONE_NUMBER
         sync: false
+      # Cloudinary Configuration (for photo storage)
+      - key: CLOUDINARY_CLOUD_NAME
+        sync: false
+      - key: CLOUDINARY_API_KEY
+        sync: false
+      - key: CLOUDINARY_API_SECRET
+        sync: false
     healthCheckPath: /
 
   # Frontend Static Site
