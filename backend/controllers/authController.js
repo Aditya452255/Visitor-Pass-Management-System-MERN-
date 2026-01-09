@@ -190,6 +190,31 @@ const deleteUser = async (req, res) => {
     }
 }
 
+// create user (admin only) - for creating employee and security users
+const createUser = async (req, res) => {
+    const { name, email, password, phone, role, department } = req.body;
+
+    try {
+        // Validate role - only allow employee and security creation
+        if (role !== 'employee' && role !== 'security') {
+            return res.status(400).json({ error: 'Only employee and security roles can be created through this endpoint' });
+        }
+
+        const user = await User.signup(name, email, password, phone, role, department);
+        
+        res.status(201).json({
+            _id: user._id,
+            name: user.name,
+            email: user.email,
+            role: (user.role || '').toString().toLowerCase(),
+            department: user.department,
+            message: 'User created successfully'
+        });
+    } catch (error) {
+        res.status(400).json({ error: error.message });
+    }
+}
+
 module.exports = {
     loginUser,
     signupUser,
@@ -198,6 +223,6 @@ module.exports = {
     getAllUsers,
     getHosts,
     updateUserRole,
-    deleteUser
+    deleteUser,
+    createUser
 }
-

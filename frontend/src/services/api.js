@@ -407,6 +407,20 @@ export const usersAPI = {
     return response.json();
   },
 
+  // Create user (admin only)
+  create: async (userData) => {
+    const response = await fetch(`${API_URL}/auth/create-user`, {
+      method: 'POST',
+      headers: getAuthHeaders(),
+      body: JSON.stringify(userData)
+    });
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to create user');
+    }
+    return response.json();
+  },
+
   // corrected path and method: PUT /auth/users/:id/role
   updateRole: async (userId, role, isActive) => {
     const response = await fetch(`${API_URL}/auth/users/${userId}/role`, {

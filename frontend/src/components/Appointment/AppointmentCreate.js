@@ -38,33 +38,13 @@ const AppointmentCreate = () => {
       setVisitors(Array.isArray(visitorsList) ? visitorsList : []);
 
       const usersList = usersData?.users ?? usersData ?? [];
-      const allowedDepartments = new Set([
-        'IT Department',
-        'HR Department',
-        'Administration Department',
-        'Accounts Department'
-      ]);
-      const allowedEmployees = [
-        { name: 'Rahul Verma', department: 'IT Department' },
-        { name: 'Neha Gupta', department: 'HR Department' },
-        { name: 'Suresh Kumar', department: 'Administration Department' },
-        { name: 'Nitin Jain', department: 'Accounts Department' }
-      ];
-
       const normalize = (value) => (value || '').toString().trim().toLowerCase();
 
+      // Show all employees (including newly created ones)
       const filteredHosts = Array.isArray(usersList)
         ? usersList.filter((userItem) => {
             const role = normalize(userItem.role);
-            const department = (userItem.department || '').toString().trim();
-            const name = (userItem.name || '').toString().trim();
-
-            if (role !== 'employee') return false;
-            if (!allowedDepartments.has(department)) return false;
-
-            return allowedEmployees.some(
-              (emp) => normalize(emp.name) === normalize(name) && emp.department === department
-            );
+            return role === 'employee';
           })
         : [];
 

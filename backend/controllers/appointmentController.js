@@ -138,8 +138,14 @@ const createAppointment = async (req, res) => {
       ? appointmentTime
       : appointmentDateObj.toTimeString().slice(0, 5); // "HH:MM"
 
-    // Prepare photo path for storage (use Cloudinary URL if file was uploaded)
-    const photoPath = req.file ? req.file.secure_url : null;
+    // Prepare photo path for storage (Cloudinary secure_url preferred, fallback to path)
+    const photoPath = req.file ? (req.file.secure_url || req.file.path || null) : null;
+    console.log('[createAppointment] file:', req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      secure_url: req.file.secure_url,
+      path: req.file.path
+    } : null, 'photoPath:', photoPath);
 
     const newAppointment = await Appointment.create({
       visitor: visitor ? visitor._id : undefined,
@@ -155,9 +161,7 @@ const createAppointment = async (req, res) => {
       createdBy: req.user ? req.user._id : undefined
     });
 
-    const populatedAppointment = await Appointment.findById(newAppointment._id)
-      .populate('visitor')
-      .populate('host', 'name email phone department');
+    const populatedAppointment = await newAppointment.populate([{ path: 'visitor' }, { path: 'host', select: 'name email phone department' }]); // Optimized: populate directly on created doc 'name email phone department');
 
     // Notify host by email (do not block if email fails)
     try {
@@ -174,7 +178,7 @@ const createAppointment = async (req, res) => {
         </ul>
         <p>Please review and approve/reject this appointment.</p>
       `;
-      await sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
+      sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
     } catch (mailErr) {
       console.warn('Failed to send new appointment email to host:', mailErr?.message || mailErr);
     }
@@ -237,8 +241,14 @@ const createAppointmentPublic = async (req, res) => {
       ? appointmentTime
       : appointmentDateObj.toTimeString().slice(0, 5);
 
-    // Use uploaded photo if provided (Cloudinary secure_url)
-    const photoPath = req.file ? req.file.secure_url : null;
+    // Use uploaded photo if provided (Cloudinary secure_url preferred, fallback to path)
+    const photoPath = req.file ? (req.file.secure_url || req.file.path || null) : null;
+    console.log('[createAppointmentPublic] file:', req.file ? {
+      originalname: req.file.originalname,
+      mimetype: req.file.mimetype,
+      secure_url: req.file.secure_url,
+      path: req.file.path
+    } : null, 'photoPath:', photoPath);
 
     const newAppointment = await Appointment.create({
       visitor: visitor ? visitor._id : undefined,
@@ -253,9 +263,7 @@ const createAppointmentPublic = async (req, res) => {
       status: 'pending'
     });
 
-    const populatedAppointment = await Appointment.findById(newAppointment._id)
-      .populate('visitor')
-      .populate('host', 'name email phone department');
+    const populatedAppointment = await newAppointment.populate([{ path: 'visitor' }, { path: 'host', select: 'name email phone department' }]); // Optimized: populate directly on created doc 'name email phone department');
 
     // Notify host (best-effort)
     try {
@@ -272,7 +280,7 @@ const createAppointmentPublic = async (req, res) => {
         </ul>
         <p>Please review and approve/reject this appointment.</p>
       `;
-      await sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
+      sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
     } catch (mailErr) {
       console.warn('Failed to send new appointment email to host:', mailErr?.message || mailErr);
     }
@@ -561,7 +569,7 @@ const rejectAppointment = async (req, res) => {
           ${rejectionReason ? `<p><strong>Reason:</strong> ${rejectionReason}</p>` : ''}
           <p>Please contact ${appointment.host.name} for more information.</p>
         `;
-        await sendEmail(appointment.visitor.email, 'Appointment Rejected', rejectionEmail);
+        sendEmail(appointment.visitor.email, 'Appointment Rejected', rejectionEmail);
       }
     } catch (e) {
       console.warn('Failed to send rejection email:', e?.message || e);
@@ -608,8 +616,8 @@ const cancelAppointment = async (req, res) => {
         <h2>Appointment Cancelled</h2>
         <p>The appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been cancelled.</p>
       `;
-      await sendEmail(appointment.visitor.email, 'Appointment Cancelled', cancellationEmail);
-      await sendEmail(appointment.host.email, 'Appointment Cancelled', cancellationEmail);
+      sendEmail(appointment.visitor.email, 'Appointment Cancelled', cancellationEmail);
+      sendEmail(appointment.host.email, 'Appointment Cancelled', cancellationEmail);
     } catch (e) {
       console.warn('Failed to send cancellation emails:', e?.message || e);
     }
@@ -686,8 +694,8 @@ const deleteAppointment = async (req, res) => {
         <h2>Appointment Deleted</h2>
         <p>The appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been deleted.</p>
       `;
-      await sendEmail(appointment.visitor.email, 'Appointment Deleted', deletionEmail);
-      await sendEmail(appointment.host.email, 'Appointment Deleted', deletionEmail);
+      sendEmail(appointment.visitor.email, 'Appointment Deleted', deletionEmail);
+      sendEmail(appointment.host.email, 'Appointment Deleted', deletionEmail);
     } catch (e) {
       console.warn('Failed to send deletion emails:', e?.message || e);
     }
@@ -745,3 +753,4 @@ module.exports = {
   updateAppointment,
   getAppointmentStats
 };
+

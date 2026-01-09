@@ -55,6 +55,9 @@ const Navbar = () => {
                   <Link className="navbar-link" to="/visitors" onClick={closeMobileMenu}>
                     Visitors
                   </Link>
+                  <Link className="navbar-link" to="/users" onClick={closeMobileMenu}>
+                    Users
+                  </Link>
                   {/* Passes, Check Logs hidden for ADMIN per requirements */}
                 </>
               )}
@@ -72,7 +75,7 @@ const Navbar = () => {
                   My Pass
                 </Link>
               )}
-              {user.role === 'visitor' && (
+              {(user.role === 'visitor' || user.role === 'employee') && (
                 <Link className="navbar-link" to="/profile" onClick={closeMobileMenu}>
                   Profile
                 </Link>

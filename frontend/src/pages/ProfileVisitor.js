@@ -5,8 +5,8 @@ import Loader from '../components/Shared/Loader';
 
 const ProfileVisitor = () => {
   const { user, login } = useAuthContext();
-  const [form, setForm] = useState({ name: '', email: '', phone: '', role: '' });
-  const [originalForm, setOriginalForm] = useState({ name: '', email: '', phone: '', role: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', role: '', department: '' });
+  const [originalForm, setOriginalForm] = useState({ name: '', email: '', phone: '', role: '', department: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -14,6 +14,8 @@ const ProfileVisitor = () => {
   const [success, setSuccess] = useState('');
 
   const isVisitor = (user?.role || '').toLowerCase() === 'visitor';
+  const isEmployee = (user?.role || '').toLowerCase() === 'employee';
+  const canEditProfile = isVisitor || isEmployee;
 
   useEffect(() => {
     let mounted = true;
@@ -26,7 +28,8 @@ const ProfileVisitor = () => {
           name: data?.name || '',
           email: data?.email || '',
           phone: data?.phone || '',
-          role: (data?.role || '').toLowerCase()
+          role: (data?.role || '').toLowerCase(),
+          department: data?.department || ''
         };
         setForm(profileData);
         setOriginalForm(profileData);
@@ -61,7 +64,15 @@ const ProfileVisitor = () => {
     if (v) { setError(v); return; }
     try {
       setSaving(true);
-      const payload = { name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim() };
+      const payload = { 
+        name: form.name.trim(), 
+        email: form.email.trim(), 
+        phone: form.phone.trim()
+      };
+      // Include department for employees
+      if (isEmployee && form.department) {
+        payload.department = form.department.trim();
+      }
       const updated = await authAPI.updateProfile(payload);
       if (updated?.error) throw new Error(updated.error);
       setSuccess('Profile updated successfully');
@@ -96,11 +107,11 @@ const ProfileVisitor = () => {
     setIsEditing(false);
   };
 
-  if (!isVisitor) {
+  if (!canEditProfile) {
     return (
       <div style={{ padding: 16 }}>
         <h2>Profile</h2>
-        <p>This section is available only for visitor accounts.</p>
+        <p>This section is available only for visitor and employee accounts.</p>
       </div>
     );
   }
@@ -158,6 +169,23 @@ const ProfileVisitor = () => {
             }}
           />
         </div>
+        {isEmployee && (
+          <div className="form-group">
+            <label htmlFor="department">Department</label>
+            <input 
+              id="department" 
+              name="department" 
+              type="text" 
+              value={form.department || ''} 
+              onChange={onChange}
+              disabled={!isEditing}
+              style={{ 
+                backgroundColor: !isEditing ? '#f5f5f5' : 'white',
+                cursor: !isEditing ? 'not-allowed' : 'text'
+              }}
+            />
+          </div>
+        )}
         <div className="form-group">
           <label htmlFor="role">Role</label>
           <input 

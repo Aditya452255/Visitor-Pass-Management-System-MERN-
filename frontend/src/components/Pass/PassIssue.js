@@ -31,33 +31,16 @@ const PassIssue = () => {
       // API may return arrays directly or wrapped objects
       const visitorsList = visitorsData?.visitors || visitorsData || [];
       const hostsList = hostsData?.users || hostsData || [];
-      const allowedDepartments = new Set([
-        'IT Department',
-        'HR Department',
-        'Administration Department',
-        'Accounts Department'
-      ]);
-      const allowedEmployees = [
-        { name: 'Rahul Verma', department: 'IT Department' },
-        { name: 'Neha Gupta', department: 'HR Department' },
-        { name: 'Suresh Kumar', department: 'Administration Department' },
-        { name: 'Nitin Jain', department: 'Accounts Department' }
-      ];
-
       const normalize = (val) => (val || '').toString().trim().toLowerCase();
 
+      // Show all employees (including newly created ones)
       const filteredHosts = Array.isArray(hostsList)
         ? hostsList.filter((h) => {
             const role = normalize(h.role);
-            const department = (h.department || '').toString().trim();
-            const name = (h.name || '').toString().trim();
-            if (role !== 'employee') return false;
-            if (!allowedDepartments.has(department)) return false;
-            return allowedEmployees.some(
-              (emp) => normalize(emp.name) === normalize(name) && emp.department === department
-            );
+            return role === 'employee';
           })
         : [];
+      
       setVisitors(Array.isArray(visitorsList) ? visitorsList : []);
       setHosts(filteredHosts);
     } catch (error) {

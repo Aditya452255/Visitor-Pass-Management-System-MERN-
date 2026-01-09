@@ -365,10 +365,12 @@ const verifyPass = async (req, res) => {
     const appointmentPhotoNormalized = normalizePhotoPath(appointmentDetails?.visitorPhoto);
 
     // Return pass with best-available photo for check-in verification
+    const chosenPhoto = appointmentPhotoNormalized || visitorPhotoNormalized;
+    console.log('[verifyPass] appointmentPhoto:', appointmentPhotoNormalized, 'visitorPhoto:', visitorPhotoNormalized, 'chosen:', chosenPhoto);
     const response = {
       valid: true,
       pass,
-      visitorPhoto: appointmentPhotoNormalized || visitorPhotoNormalized
+      visitorPhoto: chosenPhoto
     };
 
     res.status(200).json(response);

@@ -87,21 +87,6 @@ const Signup = () => {
         </div>
 
         <div className="form-group">
-          <label htmlFor="signup-role">Role:</label>
-          <select
-            id="signup-role"
-            value={role}
-            onChange={(e) => setRole(e.target.value)}
-            disabled={isLoading}
-          >
-            <option value="visitor">Visitor</option>
-            <option value="employee">Employee</option>
-            <option value="security">Security</option>
-          </select>
-          <small>Choose 'Visitor' if you're registering as a visitor (no staff privileges).</small>
-        </div>
-
-        <div className="form-group">
           <label htmlFor="signup-department">Department (optional):</label>
           <input
             id="signup-department"

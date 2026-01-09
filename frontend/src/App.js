@@ -21,6 +21,7 @@ import PassList from './components/Pass/PassList';
 import PassIssue from './components/Pass/PassIssue';
 import MyPass from './components/Pass/MyPass';
 import ProfileVisitor from './pages/ProfileVisitor';
+import UserManagement from './components/User/UserManagement';
 import Navbar from './components/Shared/Navbar';
 import NotFound from './pages/NotFound';
 
@@ -112,6 +113,16 @@ function App() {
             }
           />
 
+          {/* User Management - Admin Only */}
+          <Route
+            path="/users"
+            element={
+              <RequireAuth allowed={['admin']}>
+                <UserManagement />
+              </RequireAuth>
+            }
+          />
+
           {/* Checklogs / Checkin */}
           <Route
             path="/checklogs"
@@ -158,7 +169,7 @@ function App() {
           <Route
             path="/profile"
             element={
-              <RequireAuth allowed={['visitor']}>
+              <RequireAuth allowed={['visitor', 'employee']}>
                 <ProfileVisitor />
               </RequireAuth>
             }

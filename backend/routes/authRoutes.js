@@ -9,7 +9,8 @@ const {
   getAllUsers,
   getHosts,
   updateUserRole,
-  deleteUser
+  deleteUser,
+  createUser
 } = require('../controllers/authController');
 
 const auth = require('../middleware/auth');
@@ -28,6 +29,7 @@ router.put('/profile', auth, updateProfile);
 
 // Admin routes
 router.get('/users', auth, checkRole('admin'), getAllUsers);
+router.post('/create-user', auth, checkRole('admin'), createUser);
 router.put('/users/:id/role', auth, checkRole('admin'), updateUserRole);
 router.delete('/users/:id', auth, checkRole('admin'), deleteUser);
 
