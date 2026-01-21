@@ -5,6 +5,8 @@ A comprehensive full-stack web application for managing visitor passes, appointm
 ## Deploy 
 - [Deploy](https://visitor-pass-management-system-mern.vercel.app/)
 
+- [Video](https://www.loom.com/share/363a1035a04647199f06bbc81bc69df6)
+
 ## 🏗️ Architecture
 
 **MERN Stack Application:**
