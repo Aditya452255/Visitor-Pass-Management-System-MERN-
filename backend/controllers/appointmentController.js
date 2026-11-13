@@ -1,18 +1,26 @@
-// controllers/appointmentController.js  (fixed)
-const Appointment = require('../models/Appointment');
-const Visitor = require('../models/Visitor');
-const User = require('../models/User');
-const Pass = require('../models/Pass');
+const prisma = require('../config/prisma');
+const { generateQRCode } = require('../utils/qrGenerator');
 const { sendAppointmentConfirmation, sendEmail } = require('../utils/emailService');
 const { sendAppointmentSMS } = require('../utils/smsService');
+const { logger } = require('../utils/logger');
 
-const { generateQRCode } = require('../utils/qrGenerator');
+// Format appointment object for frontend backward compatibility
+const formatAppointment = (a) => {
+  if (!a) return null;
+  return {
+    ...a,
+    _id: a.id,
+    visitor: a.visitor ? { ...a.visitor, _id: a.visitor.id } : null,
+    host: a.host ? { ...a.host, _id: a.host.id, role: (a.host.role || '').toString().toLowerCase() } : null,
+    approvedBy: a.approvedBy ? { ...a.approvedBy, _id: a.approvedBy.id } : null,
+    createdBy: a.createdBy ? { ...a.createdBy, _id: a.createdBy.id } : null
+  };
+};
 
-// Helper: build Date from possible shapes
+// Date builder helper
 const buildAppointmentDate = (dateInput, timeInput) => {
   if (!dateInput) return null;
 
-  // If time is provided, always combine date and time explicitly in LOCAL time
   if (timeInput && /^\d{2}:\d{2}$/.test(timeInput)) {
     const [y, m, d] = String(dateInput).split('-').map((n) => parseInt(n, 10));
     const [hh, mm] = String(timeInput).split(':').map((n) => parseInt(n, 10));
@@ -22,13 +30,11 @@ const buildAppointmentDate = (dateInput, timeInput) => {
     }
   }
 
-  // Otherwise, if the input already includes a time (ISO or similar), parse directly
   if (typeof dateInput === 'string' && /(T|\s)\d{1,2}:\d{2}/.test(dateInput)) {
     const direct = new Date(dateInput);
     if (!Number.isNaN(direct.getTime())) return direct;
   }
 
-  // Fallback: try parsing date-only (local midnight). This should be rare because time is required.
   const [y, m, d] = String(dateInput).split('-').map((n) => parseInt(n, 10));
   if (Number.isFinite(y) && Number.isFinite(m) && Number.isFinite(d)) {
     const onlyDate = new Date(y, m - 1, d, 0, 0, 0, 0);
@@ -38,202 +44,83 @@ const buildAppointmentDate = (dateInput, timeInput) => {
   return null;
 };
 
-// Create appointment
+// Generate random unique pass number
+const generatePassNumber = async () => {
+  const dateStr = new Date().toISOString().slice(2, 10).replace(/-/g, '');
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+    const candidate = `VP${dateStr}${random}`;
+    const exists = await prisma.pass.findUnique({ where: { passNumber: candidate } });
+    if (!exists) return candidate;
+  }
+  return `VP${dateStr}${Math.floor(Math.random() * 100000).toString().padStart(5, '0')}`;
+};
+
+// POST /api/appointments
 const createAppointment = async (req, res) => {
   try {
-    const {
-      visitorId,
-      hostId,
-      appointmentDate, // ISO or date-only
-      appointmentTime, // optional time HH:MM
-      duration,
-      purpose,
-  
-      location,
-      notes
-    } = req.body;
+    const { visitorId, hostId, appointmentDate, appointmentTime, duration, purpose, location, notes } = req.body;
 
-    // Validate photo upload
-    if (!req.file) {
+    const photoUrl = req.file?.url || req.file?.secure_url || req.file?.path;
+    if (!photoUrl) {
       return res.status(400).json({ error: 'Visitor photo is required' });
     }
 
-    // Resolve visitor strictly via user link when logged in as visitor
-    let finalVisitorId = visitorId;
-
-    // If the request is from an authenticated visitor, link to the Visitor record
-    // Note: `User` (auth) and `Visitor` (profile) are separate collections. When a logged-in
-    // visitor creates an appointment, find or create the corresponding Visitor document
-    // and use its `_id` for the appointment to keep queries consistent for `/api/appointments/my`.
-
-    // Basic validation: hostId, purpose and location are required. visitor is optional.
     if (!hostId || !purpose || !location) {
       return res.status(400).json({ error: 'hostId, purpose and location are required' });
     }
 
-    let visitor = null;
+    let resolvedVisitorId = visitorId;
+
+    // If logged-in visitor, resolve or auto-create their Visitor profile
     if (req.user && req.user.role === 'visitor') {
-      visitor = await Visitor.findOne({ user: req.user._id });
+      let visitor = await prisma.visitor.findUnique({
+        where: { userId: req.user.id }
+      });
 
-      // Auto-create a minimal visitor profile if missing, using auth user data with safe defaults
       if (!visitor) {
-        const authUser = await User.findById(req.user._id);
-        if (!authUser) {
-          return res.status(400).json({ error: 'User account not found' });
-        }
-
-        visitor = await Visitor.create({
-          user: authUser._id,
-          name: authUser.name || 'Visitor',
-          email: (authUser.email || '').toLowerCase(),
-          phone: authUser.phone || 'N/A',
-          company: '',
-          idType: 'other',
-          idNumber: `AUTO-${Date.now()}`,
-          photo: 'uploads/visitors/placeholder.jpg',
-          address: '',
-          purpose: purpose || 'Visitor appointment',
-          vehicleNumber: '',
-          visitCount: 0,
-          lastVisit: new Date()
+        visitor = await prisma.visitor.create({
+          data: {
+            userId: req.user.id,
+            name: req.user.name || 'Visitor',
+            email: req.user.email,
+            phone: req.user.phone || 'N/A',
+            company: '',
+            idType: 'other',
+            idNumber: `AUTO-${Date.now()}`,
+            photo: photoUrl || '/uploads/placeholder.jpg',
+            purpose: purpose || 'Visitor appointment',
+            visitCount: 0,
+            lastVisit: new Date()
+          }
         });
-
       }
 
       if (visitor.isBlacklisted) {
         return res.status(403).json({ error: 'Cannot create appointment for blacklisted visitor' });
       }
-      finalVisitorId = visitor._id;
-    } else if (finalVisitorId) {
-      visitor = await Visitor.findById(finalVisitorId);
+      resolvedVisitorId = visitor.id;
+    } else if (resolvedVisitorId) {
+      const visitor = await prisma.visitor.findUnique({ where: { id: resolvedVisitorId } });
       if (visitor && visitor.isBlacklisted) {
         return res.status(403).json({ error: 'Cannot create appointment for blacklisted visitor' });
       }
     }
 
-    const host = await User.findById(hostId);
+    const host = await prisma.user.findUnique({ where: { id: hostId } });
     if (!host) return res.status(404).json({ error: 'Host not found' });
-    const hostRole = (host.role || '').toString().toLowerCase();
-    if (hostRole !== 'employee') {
+    if ((host.role || '').toString().toLowerCase() !== 'employee') {
       return res.status(400).json({ error: 'Appointments can only be scheduled with employee hosts' });
     }
-    if (host.isActive === false) {
-      return res.status(400).json({ error: 'Selected host is not active' });
-    }
-
-    // Build appointment Date object
-    const appointmentDateObj = buildAppointmentDate(appointmentDate, appointmentTime);
-    if (!appointmentDateObj) {
-      return res.status(400).json({ error: 'Invalid or missing appointmentDate. Provide ISO datetime or YYYY-MM-DD with appointmentTime (HH:MM).' });
-    }
-
-    // Prevent scheduling in the past (allow immediate future times)
-    const now = new Date();
-    if (appointmentDateObj <= now) {
-      return res.status(400).json({ error: 'Appointment date/time cannot be in the past' });
-    }
-
-    // Normalize appointmentTime for storage
-    const normalizedTime = appointmentTime && /^\d{2}:\d{2}$/.test(appointmentTime)
-      ? appointmentTime
-      : appointmentDateObj.toTimeString().slice(0, 5); // "HH:MM"
-
-    // Prepare photo path for storage (Cloudinary secure_url preferred, fallback to path)
-    const photoPath = req.file ? (req.file.secure_url || req.file.path || null) : null;
-    console.log('[createAppointment] file:', req.file ? {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      secure_url: req.file.secure_url,
-      path: req.file.path
-    } : null, 'photoPath:', photoPath);
-
-    const newAppointment = await Appointment.create({
-      visitor: visitor ? visitor._id : undefined,
-      host: host._id,
-      appointmentDate: appointmentDateObj,
-      appointmentTime: normalizedTime,
-      duration: Number(duration) || 60,
-      purpose,
-      location,
-      notes,
-      visitorPhoto: photoPath,
-      status: 'pending',
-      createdBy: req.user ? req.user._id : undefined
-    });
-
-    const populatedAppointment = await newAppointment.populate([{ path: 'visitor' }, { path: 'host', select: 'name email phone department' }]); // Optimized: populate directly on created doc 'name email phone department');
-
-    // Notify host by email (do not block if email fails)
-    try {
-      const visitorDisplayName = visitor ? visitor.name : (req.body.visitorName || 'Guest');
-      const hostEmailHtml = `
-        <h2>New Appointment Request</h2>
-        <p>Dear ${host.name},</p>
-        <p>You have a new appointment request:</p>
-        <ul>
-          <li><strong>Visitor:</strong> ${visitorDisplayName}</li>
-          <li><strong>Date:</strong> ${appointmentDateObj.toLocaleDateString()}</li>
-          <li><strong>Time:</strong> ${normalizedTime}</li>
-          <li><strong>Purpose:</strong> ${purpose}</li>
-        </ul>
-        <p>Please review and approve/reject this appointment.</p>
-      `;
-      sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
-    } catch (mailErr) {
-      console.warn('Failed to send new appointment email to host:', mailErr?.message || mailErr);
-    }
-
-    return res.status(201).json({ success: true, appointment: populatedAppointment });
-  } catch (err) {
-    console.error('Error creating appointment:', err);
-    return res.status(500).json({ error: 'Server error while creating appointment', details: err.message });
-  }
-};
-
-// Public create appointment (for visitors who are not logged in)
-const createAppointmentPublic = async (req, res) => {
-  try {
-    const {
-      visitorId,
-      hostId,
-      appointmentDate,
-      appointmentTime,
-      duration,
-      purpose,
-      location,
-      notes
-    } = req.body;
-
-    // hostId, purpose and location are required; visitor is optional for public creation
-    if (!hostId || !purpose || !location) {
-      return res.status(400).json({ error: 'hostId, purpose and location are required' });
-    }
-
-    let visitor = null;
-    if (visitorId) {
-      visitor = await Visitor.findById(visitorId);
-      if (visitor && visitor.isBlacklisted) {
-        return res.status(403).json({ error: 'Cannot create appointment for blacklisted visitor' });
-      }
-    }
-
-    const host = await User.findById(hostId);
-    if (!host) return res.status(404).json({ error: 'Host not found' });
-    const hostRole = (host.role || '').toString().toLowerCase();
-    if (hostRole !== 'employee') {
-      return res.status(400).json({ error: 'Appointments can only be scheduled with employee hosts' });
-    }
-    if (host.isActive === false) {
+    if (!host.isActive) {
       return res.status(400).json({ error: 'Selected host is not active' });
     }
 
     const appointmentDateObj = buildAppointmentDate(appointmentDate, appointmentTime);
     if (!appointmentDateObj) {
-      return res.status(400).json({ error: 'Invalid or missing appointmentDate. Provide ISO datetime or YYYY-MM-DD with appointmentTime (HH:MM).' });
+      return res.status(400).json({ error: 'Invalid appointment date/time format' });
     }
-
-    const now = new Date();
-    if (appointmentDateObj <= now) {
+    if (appointmentDateObj <= new Date()) {
       return res.status(400).json({ error: 'Appointment date/time cannot be in the past' });
     }
 
@@ -241,31 +128,115 @@ const createAppointmentPublic = async (req, res) => {
       ? appointmentTime
       : appointmentDateObj.toTimeString().slice(0, 5);
 
-    // Use uploaded photo if provided (Cloudinary secure_url preferred, fallback to path)
-    const photoPath = req.file ? (req.file.secure_url || req.file.path || null) : null;
-    console.log('[createAppointmentPublic] file:', req.file ? {
-      originalname: req.file.originalname,
-      mimetype: req.file.mimetype,
-      secure_url: req.file.secure_url,
-      path: req.file.path
-    } : null, 'photoPath:', photoPath);
-
-    const newAppointment = await Appointment.create({
-      visitor: visitor ? visitor._id : undefined,
-      host: host._id,
-      appointmentDate: appointmentDateObj,
-      appointmentTime: normalizedTime,
-      duration: Number(duration) || 60,
-      purpose,
-      location,
-      notes,
-      visitorPhoto: photoPath,
-      status: 'pending'
+    const newAppointment = await prisma.appointment.create({
+      data: {
+        visitorId: resolvedVisitorId || undefined,
+        hostId: host.id,
+        appointmentDate: appointmentDateObj,
+        appointmentTime: normalizedTime,
+        duration: Number(duration) || 60,
+        purpose,
+        location,
+        notes,
+        visitorPhoto: photoUrl,
+        status: 'pending',
+        createdById: req.user?.id
+      },
+      include: {
+        visitor: true,
+        host: { select: { id: true, name: true, email: true, phone: true, department: true, role: true } }
+      }
     });
 
-    const populatedAppointment = await newAppointment.populate([{ path: 'visitor' }, { path: 'host', select: 'name email phone department' }]); // Optimized: populate directly on created doc 'name email phone department');
+    // Notify host via email (best-effort)
+    try {
+      const visitorName = newAppointment.visitor?.name || req.body.visitorName || 'Guest';
+      const hostHtml = `
+        <h2>New Appointment Request</h2>
+        <p>Dear ${host.name},</p>
+        <p>You have a new appointment request:</p>
+        <ul>
+          <li><strong>Visitor:</strong> ${visitorName}</li>
+          <li><strong>Date:</strong> ${appointmentDateObj.toLocaleDateString()}</li>
+          <li><strong>Time:</strong> ${normalizedTime}</li>
+          <li><strong>Purpose:</strong> ${purpose}</li>
+        </ul>
+        <p>Please review and approve or reject this appointment in the system.</p>
+      `;
+      sendEmail(host.email, 'New Appointment Request', hostHtml);
+    } catch (mailErr) {
+      logger.warn('Failed to send appointment request email to host:', mailErr.message);
+    }
 
-    // Notify host (best-effort)
+    return res.status(201).json({
+      success: true,
+      appointment: formatAppointment(newAppointment)
+    });
+  } catch (err) {
+    logger.error('Error creating appointment:', err);
+    return res.status(500).json({ error: 'Server error while creating appointment', details: err.message });
+  }
+};
+
+// POST /api/appointments/public
+const createAppointmentPublic = async (req, res) => {
+  try {
+    const { visitorId, hostId, appointmentDate, appointmentTime, duration, purpose, location, notes } = req.body;
+
+    if (!hostId || !purpose || !location) {
+      return res.status(400).json({ error: 'hostId, purpose and location are required' });
+    }
+
+    let visitor = null;
+    if (visitorId) {
+      visitor = await prisma.visitor.findUnique({ where: { id: visitorId } });
+      if (visitor && visitor.isBlacklisted) {
+        return res.status(403).json({ error: 'Cannot create appointment for blacklisted visitor' });
+      }
+    }
+
+    const host = await prisma.user.findUnique({ where: { id: hostId } });
+    if (!host) return res.status(404).json({ error: 'Host not found' });
+    if ((host.role || '').toString().toLowerCase() !== 'employee') {
+      return res.status(400).json({ error: 'Appointments can only be scheduled with employee hosts' });
+    }
+    if (!host.isActive) {
+      return res.status(400).json({ error: 'Selected host is not active' });
+    }
+
+    const appointmentDateObj = buildAppointmentDate(appointmentDate, appointmentTime);
+    if (!appointmentDateObj) {
+      return res.status(400).json({ error: 'Invalid or missing appointmentDate' });
+    }
+    if (appointmentDateObj <= new Date()) {
+      return res.status(400).json({ error: 'Appointment date/time cannot be in the past' });
+    }
+
+    const normalizedTime = appointmentTime && /^\d{2}:\d{2}$/.test(appointmentTime)
+      ? appointmentTime
+      : appointmentDateObj.toTimeString().slice(0, 5);
+
+    const photoUrl = req.file?.url || req.file?.secure_url || req.file?.path || null;
+
+    const newAppointment = await prisma.appointment.create({
+      data: {
+        visitorId: visitor ? visitor.id : undefined,
+        hostId: host.id,
+        appointmentDate: appointmentDateObj,
+        appointmentTime: normalizedTime,
+        duration: Number(duration) || 60,
+        purpose,
+        location,
+        notes,
+        visitorPhoto: photoUrl,
+        status: 'pending'
+      },
+      include: {
+        visitor: true,
+        host: { select: { id: true, name: true, email: true, phone: true, department: true, role: true } }
+      }
+    });
+
     try {
       const visitorDisplayName = visitor ? visitor.name : (req.body.visitorName || 'Guest');
       const hostEmailHtml = `
@@ -278,436 +249,454 @@ const createAppointmentPublic = async (req, res) => {
           <li><strong>Time:</strong> ${normalizedTime}</li>
           <li><strong>Purpose:</strong> ${purpose}</li>
         </ul>
-        <p>Please review and approve/reject this appointment.</p>
+        <p>Please review and approve or reject this appointment.</p>
       `;
       sendEmail(host.email, 'New Appointment Request', hostEmailHtml);
     } catch (mailErr) {
-      console.warn('Failed to send new appointment email to host:', mailErr?.message || mailErr);
+      logger.warn('Failed to send public appointment email to host:', mailErr.message);
     }
 
-    return res.status(201).json({ success: true, appointment: populatedAppointment });
+    return res.status(201).json({ success: true, appointment: formatAppointment(newAppointment) });
   } catch (err) {
-    console.error('Error creating public appointment:', err);
+    logger.error('Error creating public appointment:', err);
     return res.status(500).json({ error: 'Server error while creating appointment', details: err.message });
   }
 };
 
-// Get all appointments
+// GET /api/appointments
 const getAllAppointments = async (req, res) => {
   try {
     let { status, date, hostId, page = 1, limit = 10 } = req.query;
-    page = parseInt(page, 10) || 1;
-    limit = parseInt(limit, 10) || 10;
+    page = Math.max(parseInt(page, 10) || 1, 1);
+    limit = Math.max(parseInt(limit, 10) || 10, 1);
 
-    const query = {};
-
-    if (status) query.status = status;
+    const where = {};
+    if (status) where.status = status;
 
     if (date) {
       const startDate = new Date(date);
       const endDate = new Date(date);
       endDate.setDate(endDate.getDate() + 1);
-      query.appointmentDate = { $gte: startDate, $lt: endDate };
+      where.appointmentDate = { gte: startDate, lt: endDate };
     }
 
-    // Employees can only see their own appointments
     if (req.user && req.user.role === 'employee') {
-      query.host = req.user._id;
+      where.hostId = req.user.id;
     } else if (hostId) {
-      query.host = hostId;
+      where.hostId = hostId;
     }
 
-    const appointments = await Appointment.find(query)
-      .populate('visitor')
-      .populate('host', 'name email phone department')
-      .populate('approvedBy', 'name')
-      .sort({ appointmentDate: -1, appointmentTime: -1 })
-      .limit(limit)
-      .skip((page - 1) * limit);
-
-    const count = await Appointment.countDocuments(query);
+    const [appointments, count] = await Promise.all([
+      prisma.appointment.findMany({
+        where,
+        include: {
+          visitor: true,
+          host: { select: { id: true, name: true, email: true, phone: true, department: true, role: true } },
+          approvedBy: { select: { id: true, name: true } }
+        },
+        orderBy: [
+          { appointmentDate: 'desc' },
+          { appointmentTime: 'desc' }
+        ],
+        skip: (page - 1) * limit,
+        take: limit
+      }),
+      prisma.appointment.count({ where })
+    ]);
 
     return res.status(200).json({
-      appointments,
+      appointments: appointments.map(formatAppointment),
       totalPages: Math.ceil(count / limit),
       currentPage: page,
       totalAppointments: count
     });
   } catch (err) {
-    console.error('getAllAppointments error:', err);
+    logger.error('getAllAppointments error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Get single appointment
+// GET /api/appointments/:id
 const getAppointment = async (req, res) => {
   try {
     const { id } = req.params;
-    const appointment = await Appointment.findById(id)
-      .populate('visitor')
-      .populate('host', 'name email phone department')
-      .populate('approvedBy', 'name');
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: {
+        visitor: true,
+        host: { select: { id: true, name: true, email: true, phone: true, department: true, role: true } },
+        approvedBy: { select: { id: true, name: true } }
+      }
+    });
 
     if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
 
-    // Employees can only access their own appointments
     if (req.user && req.user.role === 'employee') {
-      const hostId = appointment.host?._id?.toString();
-      if (!hostId || hostId !== req.user._id.toString()) {
+      if (appointment.hostId !== req.user.id) {
         return res.status(403).json({ error: 'Forbidden: not your appointment' });
       }
     }
 
-    return res.status(200).json(appointment);
+    return res.status(200).json(formatAppointment(appointment));
   } catch (err) {
-    console.error('getAppointment error:', err);
+    logger.error('getAppointment error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Authenticated: Get appointments for the currently logged-in visitor
+// GET /api/appointments/my (authenticated visitor)
 const getMyAppointments = async (req, res) => {
   try {
     if (!req.user) return res.status(401).json({ error: 'Unauthorized' });
-
-    // If user is visitor, return their appointments; else return for specified user (admin/employee can use other endpoints)
     if (req.user.role !== 'visitor') {
-      return res.status(403).json({ error: 'Only visitors can access this endpoint to see their own appointments' });
+      return res.status(403).json({ error: 'Only visitors can access this endpoint' });
     }
 
-    // Determine the Visitor _id strictly via user linkage
-    let visitorId = req.user._id;
-    if (req.user.role === 'visitor') {
-      const visitorDoc = await Visitor.findOne({ user: req.user._id });
-      if (!visitorDoc) return res.status(400).json({ error: 'Visitor profile not found for this user.' });
-      visitorId = visitorDoc._id;
+    const visitorDoc = await prisma.visitor.findUnique({
+      where: { userId: req.user.id }
+    });
+
+    if (!visitorDoc) {
+      return res.status(200).json({ appointments: [] });
     }
 
-    const appointments = await Appointment.find({ visitor: visitorId })
-      .populate('visitor', 'name email phone')
-      .populate('host', 'name email department')
-      .populate('approvedBy', 'name')
-      .sort({ appointmentDate: -1, appointmentTime: -1 });
+    const appointments = await prisma.appointment.findMany({
+      where: { visitorId: visitorDoc.id },
+      include: {
+        visitor: { select: { id: true, name: true, email: true, phone: true } },
+        host: { select: { id: true, name: true, email: true, department: true } },
+        approvedBy: { select: { id: true, name: true } }
+      },
+      orderBy: [
+        { appointmentDate: 'desc' },
+        { appointmentTime: 'desc' }
+      ]
+    });
 
-    return res.status(200).json({ appointments });
+    return res.status(200).json({ appointments: appointments.map(formatAppointment) });
   } catch (err) {
-    console.error('getMyAppointments error:', err);
+    logger.error('getMyAppointments error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Public: Get appointments for a visitor (by visitorId)
+// GET /api/appointments/visitor/:visitorId
 const getAppointmentsByVisitor = async (req, res) => {
   try {
     const { visitorId } = req.params;
     if (!visitorId) return res.status(400).json({ error: 'visitorId is required' });
 
-    const appointments = await Appointment.find({ visitor: visitorId })
-      .populate('visitor', 'name email phone')
-      .populate('host', 'name email department')
-      .populate('approvedBy', 'name')
-      .sort({ appointmentDate: -1, appointmentTime: -1 });
+    const appointments = await prisma.appointment.findMany({
+      where: { visitorId },
+      include: {
+        visitor: { select: { id: true, name: true, email: true, phone: true } },
+        host: { select: { id: true, name: true, email: true, department: true } },
+        approvedBy: { select: { id: true, name: true } }
+      },
+      orderBy: [
+        { appointmentDate: 'desc' },
+        { appointmentTime: 'desc' }
+      ]
+    });
 
-    return res.status(200).json({ appointments });
+    return res.status(200).json({ appointments: appointments.map(formatAppointment) });
   } catch (err) {
-    console.error('getAppointmentsByVisitor error:', err);
+    logger.error('getAppointmentsByVisitor error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Approve appointment
+// PATCH /api/appointments/:id/approve
 const approveAppointment = async (req, res) => {
   const { id } = req.params;
-  console.log(`[Approve] Received request to approve appointment ID: ${id}`);
-  console.log(`[Approve] Action performed by user: ${req.user ? req.user.email : 'Unknown'}`);
 
   try {
-    const appointment = await Appointment.findById(id).populate('visitor').populate('host', 'name email phone');
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: { visitor: true, host: true }
+    });
 
     if (!appointment) {
       return res.status(404).json({ error: 'Appointment not found' });
     }
 
-    if (req.user && req.user.role === 'employee') {
-      const hostId = appointment.host?._id?.toString();
-      if (!hostId || hostId !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'Forbidden: only the assigned host can approve' });
-      }
+    if (req.user && req.user.role === 'employee' && appointment.hostId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: only the assigned host can approve' });
     }
 
-    appointment.status = 'approved';
-    appointment.approvedBy = req.user ? req.user._id : undefined;
-    appointment.approvalDate = new Date();
-    await appointment.save();
-
-    // Track notification success
     let emailSent = false;
     let smsSent = false;
 
-    // Send confirmation email + SMS (best-effort) only if visitor contact exists
-    if (appointment.visitor && appointment.visitor.email) {
-      console.log(`[Approve] Visitor has email (${appointment.visitor.email}). Preparing to send confirmation.`);
-      try {
-        // Generate QR code for the appointment details
-        console.log(`[Approve] Generating QR code for appointment ${id}...`);
-        const qrCodeDataURL = await generateQRCode({
-          appointmentId: appointment._id,
-          visitorId: appointment.visitor._id,
-          hostId: appointment.host._id,
-          date: appointment.appointmentDate,
-        });
-        console.log(`[Approve] ✓ QR Code generated successfully`);
-        
-        console.log(`[Approve] Sending email to ${appointment.visitor.email}...`);
-        await sendAppointmentConfirmation(appointment, appointment.visitor, appointment.host, qrCodeDataURL);
-        console.log(`[Approve] ✓ Email sent successfully for appointment ID: ${id}`);
-        emailSent = true;
-      } catch (e) {
-        console.error(`[Approve] ✗ FAILED to send appointment confirmation email for ID: ${id}`);
-        console.error(`[Approve] Error details:`, e?.message || e);
-        console.error(`[Approve] Error stack:`, e?.stack);
-        // Don't throw - continue with SMS and response
-      }
-    } else {
-      console.log(`[Approve] Skipping email for appointment ID: ${id}. Visitor: ${appointment.visitor ? 'exists' : 'MISSING'}, Email: ${appointment.visitor?.email || 'MISSING'}`);
-    }
+    // 1. Auto-issue an active pass linked to this appointment if none exists
+    let pass = await prisma.pass.findFirst({
+      where: { appointmentId: appointment.id, status: 'active' }
+    });
 
-    if (appointment.visitor && appointment.visitor.phone) {
-      console.log(`[Approve] Visitor has phone number. Sending SMS...`);
-      try {
-        await sendAppointmentSMS(appointment.visitor.phone, {
-          date: new Date(appointment.appointmentDate).toLocaleDateString(),
-          time: appointment.appointmentTime,
-          location: appointment.location,
-          host: appointment.host?.name || ''
-        });
-        console.log(`[Approve] ✓ SMS sent successfully for appointment ID: ${id}`);
-        smsSent = true;
-      } catch (e) {
-        console.warn(`[Approve] ✗ Failed to send appointment SMS for ID: ${id}. Error:`, e?.message || e);
-      }
-    }
+    if (!pass) {
+      const passNumber = await generatePassNumber();
+      const base = new Date(appointment.appointmentDate);
+      const durationMinutes = Number(appointment.duration) || 60;
+      const validFrom = new Date(base.getTime() - 30 * 60000);
+      const validUntil = new Date(base.getTime() + (durationMinutes + 30) * 60000);
 
-    // Only mark as notificationsSent if at least email was sent
-    appointment.notificationsSent = emailSent;
-    await appointment.save();
-    
-    console.log(`[Approve] Notification status - Email: ${emailSent ? '✓' : '✗'}, SMS: ${smsSent ? '✓' : '✗'}`);
+      // Generate PII-free QR code
+      const qrCodeDataURL = await generateQRCode({
+        passNumber,
+        appointmentId: appointment.id
+      });
 
-    // Auto-issue an active pass linked to this appointment if none exists
-    try {
-      const existingPass = await Pass.findOne({ appointment: appointment._id, status: 'active' });
-      if (!existingPass) {
-        const base = new Date(appointment.appointmentDate);
-        const durationMinutes = Number(appointment.duration) || 60;
-        const bufferBeforeMin = 30;
-        const bufferAfterMin = 30;
-        const validFrom = new Date(base.getTime() - bufferBeforeMin * 60000);
-        const validUntil = new Date(base.getTime() + (durationMinutes + bufferAfterMin) * 60000);
-
-        const newPass = new Pass({
-          visitor: appointment.visitor ? appointment.visitor._id : undefined,
-          appointment: appointment._id,
-          issuedBy: req.user ? req.user._id : undefined,
-          host: appointment.host ? appointment.host._id : undefined,
+      pass = await prisma.pass.create({
+        data: {
+          passNumber,
+          visitorId: appointment.visitorId,
+          appointmentId: appointment.id,
+          issuedById: req.user?.id,
+          hostId: appointment.hostId,
           validFrom,
           validUntil,
-          status: 'active'
-        });
-
-        await newPass.save();
-        console.log(`[Approve] Auto-issued pass ${newPass.passNumber} for appointment ${appointment._id}`);
-      }
-    } catch (e) {
-      console.warn(`[Approve] Auto-issue pass skipped due to error:`, e?.message || e);
+          qrCode: qrCodeDataURL,
+          status: 'active',
+          accessAreas: ['Main Entrance', 'Meeting Area']
+        }
+      });
+      logger.info(`✓ Auto-issued pass ${pass.passNumber} for appointment ${appointment.id}`);
     }
 
-    return res.status(200).json({
-      ...appointment.toObject(),
+    // 2. Update appointment status
+    const updatedAppointment = await prisma.appointment.update({
+      where: { id },
+      data: {
+        status: 'approved',
+        approvedById: req.user?.id,
+        approvalDate: new Date()
+      },
+      include: { visitor: true, host: true }
+    });
+
+    // 3. Send email with QR code
+    if (updatedAppointment.visitor?.email) {
+      try {
+        const qrCodeDataURL = pass?.qrCode || await generateQRCode({
+          passNumber: pass?.passNumber,
+          appointmentId: appointment.id
+        });
+        await sendAppointmentConfirmation(updatedAppointment, updatedAppointment.visitor, updatedAppointment.host, qrCodeDataURL);
+        emailSent = true;
+      } catch (e) {
+        logger.error(`Failed to send appointment confirmation email for ID ${id}:`, e);
+      }
+    }
+
+    // 4. Send SMS
+    if (updatedAppointment.visitor?.phone) {
+      try {
+        await sendAppointmentSMS(updatedAppointment.visitor.phone, {
+          date: new Date(updatedAppointment.appointmentDate).toLocaleDateString(),
+          time: updatedAppointment.appointmentTime,
+          location: updatedAppointment.location,
+          host: updatedAppointment.host?.name || ''
+        });
+        smsSent = true;
+      } catch (e) {
+        logger.warn(`Failed to send appointment SMS for ID ${id}:`, e.message);
+      }
+    }
+
+    await prisma.appointment.update({
+      where: { id },
+      data: { notificationsSent: emailSent }
+    });
+
+    const responseObj = {
+      ...formatAppointment(updatedAppointment),
       _notificationStatus: {
         emailSent,
         smsSent,
-        message: emailSent ? 'Appointment approved and email sent with QR code' : 'Appointment approved but email failed to send - check logs'
+        message: emailSent ? 'Appointment approved and email sent with QR code' : 'Appointment approved (email notification skipped/failed)'
       }
-    });
+    };
+
+    return res.status(200).json(responseObj);
   } catch (err) {
-    console.error(`[Approve] Critical error during approval for ID: ${id}. Error:`, err);
+    logger.error(`Critical error during approval for ID ${id}:`, err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Reject appointment
+// PATCH /api/appointments/:id/reject
 const rejectAppointment = async (req, res) => {
   try {
     const { id } = req.params;
     const { rejectionReason } = req.body;
 
-    const appointment = await Appointment.findById(id).populate('visitor').populate('host', 'name email');
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: { visitor: true, host: true }
+    });
 
     if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
 
-    if (req.user && req.user.role === 'employee') {
-      const hostId = appointment.host?._id?.toString();
-      if (!hostId || hostId !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'Forbidden: only the assigned host can reject' });
-      }
+    if (req.user && req.user.role === 'employee' && appointment.hostId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: only the assigned host can reject' });
     }
 
-    appointment.status = 'rejected';
-    appointment.approvedBy = req.user ? req.user._id : undefined;
-    appointment.approvalDate = new Date();
-    appointment.rejectionReason = rejectionReason;
-    await appointment.save();
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: {
+        status: 'rejected',
+        approvedById: req.user?.id,
+        approvalDate: new Date(),
+        rejectionReason: rejectionReason || 'No reason provided'
+      },
+      include: { visitor: true, host: true }
+    });
 
-    // Send rejection email (best-effort)
-    try {
-      if (appointment.visitor && appointment.visitor.email) {
+    if (updated.visitor?.email) {
+      try {
         const rejectionEmail = `
           <h2>Appointment Rejected</h2>
-          <p>Dear ${appointment.visitor.name},</p>
-          <p>Your appointment request for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been rejected.</p>
+          <p>Dear ${updated.visitor.name},</p>
+          <p>Your appointment request for ${new Date(updated.appointmentDate).toLocaleDateString()} at ${updated.appointmentTime} has been rejected.</p>
           ${rejectionReason ? `<p><strong>Reason:</strong> ${rejectionReason}</p>` : ''}
-          <p>Please contact ${appointment.host.name} for more information.</p>
+          <p>Please contact ${updated.host.name} for more information.</p>
         `;
-        sendEmail(appointment.visitor.email, 'Appointment Rejected', rejectionEmail);
+        sendEmail(updated.visitor.email, 'Appointment Rejected', rejectionEmail);
+      } catch (e) {
+        logger.warn('Failed to send rejection email:', e.message);
       }
-    } catch (e) {
-      console.warn('Failed to send rejection email:', e?.message || e);
     }
 
-    return res.status(200).json(appointment);
+    return res.status(200).json(formatAppointment(updated));
   } catch (err) {
-    console.error('rejectAppointment error:', err);
+    logger.error('rejectAppointment error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Cancel appointment
+// PATCH /api/appointments/:id/cancel
 const cancelAppointment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const appointment = await Appointment.findById(id).populate('visitor').populate('host', 'name email');
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: { visitor: true, host: true }
+    });
 
     if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
 
-    if (req.user && req.user.role === 'employee') {
-      const hostId = appointment.host?._id?.toString();
-      if (!hostId || hostId !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'Forbidden: only the assigned host can cancel' });
-      }
+    if (req.user && req.user.role === 'employee' && appointment.hostId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: only the assigned host can cancel' });
     }
 
-    // Visitors can cancel only their own appointments
     if (req.user && req.user.role === 'visitor') {
-      const visitorDoc = await Visitor.findOne({ user: req.user._id });
-      const apptVisitorId = appointment.visitor?._id?.toString();
-      if (!visitorDoc || !apptVisitorId || apptVisitorId !== visitorDoc._id.toString()) {
+      const visitorDoc = await prisma.visitor.findUnique({ where: { userId: req.user.id } });
+      if (!visitorDoc || appointment.visitorId !== visitorDoc.id) {
         return res.status(403).json({ error: 'Forbidden: only the appointment owner can cancel' });
       }
     }
 
-    appointment.status = 'cancelled';
-    await appointment.save();
+    const updated = await prisma.appointment.update({
+      where: { id },
+      data: { status: 'cancelled' },
+      include: { visitor: true, host: true }
+    });
 
-    // Send cancellation notification (best-effort)
     try {
       const cancellationEmail = `
         <h2>Appointment Cancelled</h2>
         <p>The appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been cancelled.</p>
       `;
-      sendEmail(appointment.visitor.email, 'Appointment Cancelled', cancellationEmail);
-      sendEmail(appointment.host.email, 'Appointment Cancelled', cancellationEmail);
+      if (appointment.visitor?.email) sendEmail(appointment.visitor.email, 'Appointment Cancelled', cancellationEmail);
+      if (appointment.host?.email) sendEmail(appointment.host.email, 'Appointment Cancelled', cancellationEmail);
     } catch (e) {
-      console.warn('Failed to send cancellation emails:', e?.message || e);
+      logger.warn('Failed to send cancellation emails:', e.message);
     }
 
-    return res.status(200).json(appointment);
+    return res.status(200).json(formatAppointment(updated));
   } catch (err) {
-    console.error('cancelAppointment error:', err);
+    logger.error('cancelAppointment error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Update appointment
+// PATCH /api/appointments/:id
 const updateAppointment = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
-    // If updating date/time, validate them
     if (updateData.appointmentDate || updateData.appointmentTime) {
-      const dateObj = buildAppointmentDate(updateData.appointmentDate || undefined, updateData.appointmentTime || undefined);
+      const dateObj = buildAppointmentDate(updateData.appointmentDate, updateData.appointmentTime);
       if (!dateObj) return res.status(400).json({ error: 'Invalid appointment date/time' });
       if (dateObj < new Date()) return res.status(400).json({ error: 'Appointment date cannot be in the past' });
       updateData.appointmentDate = dateObj;
-      if (!updateData.appointmentTime) updateData.appointmentTime = dateObj.toTimeString().slice(0,5);
+      if (!updateData.appointmentTime) updateData.appointmentTime = dateObj.toTimeString().slice(0, 5);
     }
 
-    const appointment = await Appointment.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    ).populate('visitor').populate('host', 'name email phone');
+    delete updateData.id;
+    delete updateData._id;
 
-    if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
+    const appointment = await prisma.appointment.update({
+      where: { id },
+      data: updateData,
+      include: {
+        visitor: true,
+        host: { select: { id: true, name: true, email: true, phone: true } }
+      }
+    });
 
-    return res.status(200).json(appointment);
+    return res.status(200).json(formatAppointment(appointment));
   } catch (err) {
-    console.error('updateAppointment error:', err);
+    logger.error('updateAppointment error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Delete appointment (permanently remove from database)
+// DELETE /api/appointments/:id
 const deleteAppointment = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const appointment = await Appointment.findById(id).populate('visitor').populate('host', 'name email');
+    const appointment = await prisma.appointment.findUnique({
+      where: { id },
+      include: { visitor: true, host: true }
+    });
 
     if (!appointment) return res.status(404).json({ error: 'Appointment not found' });
 
-    // Authorization: admin can delete any, employee can delete their own, visitor can delete their own
-    if (req.user && req.user.role === 'employee') {
-      const hostId = appointment.host?._id?.toString();
-      if (!hostId || hostId !== req.user._id.toString()) {
-        return res.status(403).json({ error: 'Forbidden: only the assigned host can delete' });
-      }
+    if (req.user && req.user.role === 'employee' && appointment.hostId !== req.user.id) {
+      return res.status(403).json({ error: 'Forbidden: only the assigned host can delete' });
     }
 
-    // Visitors can delete only their own appointments
     if (req.user && req.user.role === 'visitor') {
-      const visitorDoc = await Visitor.findOne({ user: req.user._id });
-      const apptVisitorId = appointment.visitor?._id?.toString();
-      if (!visitorDoc || !apptVisitorId || apptVisitorId !== visitorDoc._id.toString()) {
+      const visitorDoc = await prisma.visitor.findUnique({ where: { userId: req.user.id } });
+      if (!visitorDoc || appointment.visitorId !== visitorDoc.id) {
         return res.status(403).json({ error: 'Forbidden: only the appointment owner can delete' });
       }
     }
 
-    // Delete the appointment from the database
-    await Appointment.findByIdAndDelete(id);
+    await prisma.appointment.delete({ where: { id } });
 
-    // Send deletion notification (best-effort)
     try {
       const deletionEmail = `
         <h2>Appointment Deleted</h2>
         <p>The appointment scheduled for ${new Date(appointment.appointmentDate).toLocaleDateString()} at ${appointment.appointmentTime} has been deleted.</p>
       `;
-      sendEmail(appointment.visitor.email, 'Appointment Deleted', deletionEmail);
-      sendEmail(appointment.host.email, 'Appointment Deleted', deletionEmail);
+      if (appointment.visitor?.email) sendEmail(appointment.visitor.email, 'Appointment Deleted', deletionEmail);
+      if (appointment.host?.email) sendEmail(appointment.host.email, 'Appointment Deleted', deletionEmail);
     } catch (e) {
-      console.warn('Failed to send deletion emails:', e?.message || e);
+      logger.warn('Failed to send deletion emails:', e.message);
     }
 
     return res.status(200).json({ message: 'Appointment deleted successfully' });
   } catch (err) {
-    console.error('deleteAppointment error:', err);
+    logger.error('deleteAppointment error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
 
-// Get appointment statistics
+// GET /api/appointments/stats
 const getAppointmentStats = async (req, res) => {
   try {
     const today = new Date();
@@ -715,26 +704,34 @@ const getAppointmentStats = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    // For employees, restrict stats to their own hosted appointments
-    const hostFilter = (req.user && req.user.role === 'employee')
-      ? { host: req.user._id }
-      : {};
+    const where = {};
+    if (req.user && req.user.role === 'employee') {
+      where.hostId = req.user.id;
+    }
 
-    const stats = {
-      total: await Appointment.countDocuments(hostFilter),
-      pending: await Appointment.countDocuments({ ...hostFilter, status: 'pending' }),
-      approved: await Appointment.countDocuments({ ...hostFilter, status: 'approved' }),
-      rejected: await Appointment.countDocuments({ ...hostFilter, status: 'rejected' }),
-      todayAppointments: await Appointment.countDocuments({
-        ...hostFilter,
-        appointmentDate: { $gte: today, $lt: tomorrow },
-        status: 'approved'
+    const [total, pending, approved, rejected, todayAppointments] = await Promise.all([
+      prisma.appointment.count({ where }),
+      prisma.appointment.count({ where: { ...where, status: 'pending' } }),
+      prisma.appointment.count({ where: { ...where, status: 'approved' } }),
+      prisma.appointment.count({ where: { ...where, status: 'rejected' } }),
+      prisma.appointment.count({
+        where: {
+          ...where,
+          appointmentDate: { gte: today, lt: tomorrow },
+          status: 'approved'
+        }
       })
-    };
+    ]);
 
-    return res.status(200).json(stats);
+    return res.status(200).json({
+      total,
+      pending,
+      approved,
+      rejected,
+      todayAppointments
+    });
   } catch (err) {
-    console.error('getAppointmentStats error:', err);
+    logger.error('getAppointmentStats error:', err);
     return res.status(500).json({ error: err.message });
   }
 };
@@ -753,4 +750,3 @@ module.exports = {
   updateAppointment,
   getAppointmentStats
 };
-

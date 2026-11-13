@@ -1,298 +1,263 @@
-// controllers/checkLogController.js
-
-const CheckLog = require('../models/CheckLog');
-const Pass = require('../models/Pass');
-const Visitor = require('../models/Visitor');
+const prisma = require('../config/prisma');
 const { sendEmail } = require('../utils/emailService');
 const { sendSMS } = require('../utils/smsService');
+const { logger } = require('../utils/logger');
 
-/**
- * Check-in visitor
- */
+// Format CheckLog object for frontend compatibility
+const formatCheckLog = (log) => {
+  if (!log) return null;
+
+  let duration = null;
+  if (log.checkOutTime && log.checkInTime) {
+    duration = Math.floor((new Date(log.checkOutTime).getTime() - new Date(log.checkInTime).getTime()) / 60000);
+  }
+
+  return {
+    ...log,
+    _id: log.id,
+    duration,
+    visitor: log.visitor ? { ...log.visitor, _id: log.visitor.id } : null,
+    pass: log.pass ? { ...log.pass, _id: log.pass.id } : null,
+    checkedInBy: log.checkedInBy ? { ...log.checkedInBy, _id: log.checkedInBy.id } : null,
+    checkedOutBy: log.checkedOutBy ? { ...log.checkedOutBy, _id: log.checkedOutBy.id } : null
+  };
+};
+
+// POST /api/checklogs/checkin (Admin / Security)
 const checkIn = async (req, res) => {
   try {
-    const {
-      passId,
-      appointmentId,
-      visitorId,
-      temperature,
-      deviceInfo,
-      notes,
-      location
-    } = req.body;
+    const { passId, appointmentId, visitorId, temperature, deviceInfo, notes, location } = req.body;
 
-    // Resolve passId: try appointmentId first if it's a valid ObjectId
     let resolvedPassId = passId;
-    const mongoose = require('mongoose');
-    
-    if (appointmentId && mongoose.Types.ObjectId.isValid(appointmentId) && !resolvedPassId) {
-      const Pass = require('../models/Pass');
-      const foundPass = await Pass.findOne({ appointment: appointmentId, status: 'active' });
-      if (foundPass) {
-        resolvedPassId = foundPass._id;
-      }
+
+    // Resolve pass via appointmentId if passId not given directly
+    if (appointmentId && !resolvedPassId) {
+      const foundPass = await prisma.pass.findFirst({
+        where: { appointmentId, status: 'active' }
+      });
+      if (foundPass) resolvedPassId = foundPass.id;
     }
 
-    // Validate required fields
     if (!resolvedPassId || !visitorId) {
       return res.status(400).json({ error: 'passId (or appointmentId) and visitorId are required' });
     }
 
-    // Verify pass is valid
-    const pass = await Pass.findById(resolvedPassId).populate('visitor');
+    const pass = await prisma.pass.findUnique({
+      where: { id: resolvedPassId },
+      include: {
+        visitor: true,
+        host: { select: { id: true, name: true, email: true, phone: true } }
+      }
+    });
 
-    if (!pass) {
-      return res.status(404).json({ error: 'Pass not found' });
-    }
+    if (!pass) return res.status(404).json({ error: 'Pass not found' });
+    if (pass.status !== 'active') return res.status(400).json({ error: `Pass is ${pass.status}` });
 
-    if (pass.status !== 'active') {
-      return res.status(400).json({ error: `Pass is ${pass.status}` });
-    }
-
-    // Check if visitor is already checked in for this pass
-    const existingCheckIn = await CheckLog.findOne({
-      pass: resolvedPassId,
-      checkOutTime: null
+    // Check if visitor is already checked in with open check-out
+    const existingCheckIn = await prisma.checkLog.findFirst({
+      where: {
+        passId: resolvedPassId,
+        checkOutTime: null
+      }
     });
 
     if (existingCheckIn) {
       return res.status(400).json({ error: 'Visitor is already checked in' });
     }
 
-    // Create check-in log
-    const checkLog = await CheckLog.create({
-      pass: resolvedPassId,
-      visitor: visitorId,
-      checkInTime: new Date(),
-      checkedInBy: req.user && req.user._id ? req.user._id : undefined,
-      temperature,
-      deviceInfo,
-      notes,
-      location
+    // Create checklog
+    const checkLog = await prisma.checkLog.create({
+      data: {
+        passId: resolvedPassId,
+        visitorId,
+        checkInTime: new Date(),
+        checkedInById: req.user?.id,
+        temperature: temperature ? parseFloat(temperature) : null,
+        deviceInfo: deviceInfo || {},
+        notes: notes ? notes.trim() : null,
+        location: location ? location.trim() : 'Main Gate'
+      },
+      include: {
+        visitor: true,
+        pass: { include: { host: { select: { id: true, name: true, email: true, phone: true } } } },
+        checkedInBy: { select: { id: true, name: true } }
+      }
     });
 
-    // Update visitor stats (visit count + lastVisit)
+    // Update visitor visit count and lastVisit
     try {
-      const v = await Visitor.findById(visitorId);
-      if (v) {
-        v.visitCount = (v.visitCount || 0) + 1;
-        v.lastVisit = new Date();
-        await v.save();
-      }
+      await prisma.visitor.update({
+        where: { id: visitorId },
+        data: {
+          visitCount: { increment: 1 },
+          lastVisit: new Date()
+        }
+      });
     } catch (e) {
-      console.warn('Failed to update visitor stats:', e?.message || e);
+      logger.warn('Failed to update visitor visit count:', e.message);
     }
 
-    // Populate the log
-    const populatedLog = await CheckLog.findById(checkLog._id)
-      .populate('visitor')
-      .populate('pass')
-      .populate('checkedInBy', 'name');
-    // Send notifications: email to host (if pass.host populated) and SMS to visitor and host (best-effort)
-    try {
-      // populate pass host
-      await populatedLog.populate({ path: 'pass', populate: { path: 'host', select: 'name email phone' } });
-      const host = populatedLog.pass?.host;
-
-      // Email to host
-      if (host && host.email) {
-        const html = `
-          <h2>Visitor Checked In</h2>
-          <p>Dear ${host.name},</p>
-          <p>Your visitor ${populatedLog.visitor.name} has checked in at ${new Date(populatedLog.checkInTime).toLocaleString()}.</p>
-          <ul>
-            <li><strong>Visitor:</strong> ${populatedLog.visitor.name} (${populatedLog.visitor.email})</li>
-            <li><strong>Phone:</strong> ${populatedLog.visitor.phone}</li>
-            <li><strong>Location:</strong> ${populatedLog.location || 'N/A'}</li>
-          </ul>
-        `;
-        await sendEmail(host.email, 'Visitor Checked In', html);
-      }
-
-      // SMS to visitor
-      try {
-        if (populatedLog.visitor && populatedLog.visitor.phone) {
-          const msg = `You have checked in at ${new Date(populatedLog.checkInTime).toLocaleString()} for ${populatedLog.location || 'your appointment'}.`;
-          await sendSMS(populatedLog.visitor.phone, msg);
-        }
-      } catch (e) {
-        console.warn('Failed to send SMS to visitor:', e?.message || e);
-      }
-
-      // SMS to host
-      try {
-        if (host && host.phone) {
-          const msg = `${populatedLog.visitor.name} has checked in at ${new Date(populatedLog.checkInTime).toLocaleString()}.`;
-          await sendSMS(host.phone, msg);
-        }
-      } catch (e) {
-        console.warn('Failed to send SMS to host:', e?.message || e);
-      }
-    } catch (notifyErr) {
-      console.warn('Check-in notification error:', notifyErr?.message || notifyErr);
+    // Send notifications to host and visitor (best-effort)
+    const host = checkLog.pass?.host;
+    if (host && host.email) {
+      const html = `
+        <h2>Visitor Checked In</h2>
+        <p>Dear ${host.name},</p>
+        <p>Your visitor <strong>${checkLog.visitor.name}</strong> has checked in at ${new Date(checkLog.checkInTime).toLocaleString()}.</p>
+        <ul>
+          <li><strong>Visitor:</strong> ${checkLog.visitor.name} (${checkLog.visitor.email})</li>
+          <li><strong>Phone:</strong> ${checkLog.visitor.phone}</li>
+          <li><strong>Location:</strong> ${checkLog.location || 'Security Gate'}</li>
+        </ul>
+      `;
+      sendEmail(host.email, 'Visitor Checked In', html).catch(err => logger.warn('Check-in email failed:', err.message));
     }
 
-    return res.status(201).json(populatedLog);
+    if (checkLog.visitor?.phone) {
+      const msg = `You have checked in at ${new Date(checkLog.checkInTime).toLocaleTimeString()} at ${checkLog.location || 'Security Gate'}.`;
+      sendSMS(checkLog.visitor.phone, msg).catch(err => logger.warn('Check-in visitor SMS failed:', err.message));
+    }
+
+    return res.status(201).json(formatCheckLog(checkLog));
   } catch (error) {
-    console.error('Check-in error:', error);
+    logger.error('Check-in error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Check-out visitor
- */
+// PATCH /api/checklogs/checkout/:id (Admin / Security)
 const checkOut = async (req, res) => {
   try {
     const { id } = req.params;
     const { notes } = req.body;
 
-    if (!id) {
-      return res.status(400).json({ error: 'Check log id is required' });
-    }
+    const checkLog = await prisma.checkLog.findUnique({ where: { id } });
+    if (!checkLog) return res.status(404).json({ error: 'Check-in log not found' });
+    if (checkLog.checkOutTime) return res.status(400).json({ error: 'Visitor already checked out' });
 
-    const checkLog = await CheckLog.findById(id);
+    const updatedNotes = notes
+      ? (checkLog.notes ? `${checkLog.notes} ${notes}` : notes)
+      : checkLog.notes;
 
-    if (!checkLog) {
-      return res.status(404).json({ error: 'Check-in log not found' });
-    }
+    const updated = await prisma.checkLog.update({
+      where: { id },
+      data: {
+        checkOutTime: new Date(),
+        checkedOutById: req.user?.id,
+        notes: updatedNotes
+      },
+      include: {
+        visitor: true,
+        pass: true,
+        checkedInBy: { select: { id: true, name: true } },
+        checkedOutBy: { select: { id: true, name: true } }
+      }
+    });
 
-    if (checkLog.checkOutTime) {
-      return res.status(400).json({ error: 'Visitor already checked out' });
-    }
-
-    checkLog.checkOutTime = new Date();
-    checkLog.checkedOutBy = req.user && req.user._id ? req.user._id : undefined;
-    if (notes) checkLog.notes = (checkLog.notes || '') + ' ' + notes;
-
-    await checkLog.save();
-
-    const populatedLog = await CheckLog.findById(checkLog._id)
-      .populate('visitor')
-      .populate('pass')
-      .populate('checkedInBy', 'name')
-      .populate('checkedOutBy', 'name');
-
-    return res.status(200).json(populatedLog);
+    return res.status(200).json(formatCheckLog(updated));
   } catch (error) {
-    console.error('Check-out error:', error);
+    logger.error('Check-out error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Get check logs with filters
- */
+// GET /api/checklogs
 const getAllCheckLogs = async (req, res) => {
   try {
-    const {
-      date,
-      visitorId,
-      status,
-      page = 1,
-      limit = 10
-    } = req.query;
-
-    // ensure page & limit are numbers
+    const { date, visitorId, status, page = 1, limit = 10 } = req.query;
     const pageNum = Math.max(parseInt(page, 10) || 1, 1);
     const limitNum = Math.max(parseInt(limit, 10) || 10, 1);
 
-    let query = {};
-
-    // Filter by date (expects YYYY-MM-DD or any date string parseable by Date)
+    const where = {};
     if (date) {
       const startDate = new Date(date);
-      if (!isNaN(startDate)) {
+      if (!isNaN(startDate.getTime())) {
         const endDate = new Date(startDate);
         endDate.setDate(endDate.getDate() + 1);
-        query.checkInTime = { $gte: startDate, $lt: endDate };
+        where.checkInTime = { gte: startDate, lt: endDate };
       }
     }
 
-    // Filter by visitor
-    if (visitorId) {
-      query.visitor = visitorId;
-    }
+    if (visitorId) where.visitorId = visitorId;
 
-    // Filter by status
     if (status === 'checked-in') {
-      query.checkOutTime = null;
+      where.checkOutTime = null;
     } else if (status === 'checked-out') {
-      query.checkOutTime = { $ne: null };
+      where.checkOutTime = { not: null };
     }
 
     const [checkLogs, count] = await Promise.all([
-      CheckLog.find(query)
-        .populate('visitor')
-        .populate('pass')
-        .populate('checkedInBy', 'name')
-        .populate('checkedOutBy', 'name')
-        .sort({ checkInTime: -1 })
-        .limit(limitNum)
-        .skip((pageNum - 1) * limitNum),
-      CheckLog.countDocuments(query)
+      prisma.checkLog.findMany({
+        where,
+        include: {
+          visitor: true,
+          pass: true,
+          checkedInBy: { select: { id: true, name: true } },
+          checkedOutBy: { select: { id: true, name: true } }
+        },
+        orderBy: { checkInTime: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum
+      }),
+      prisma.checkLog.count({ where })
     ]);
 
     return res.status(200).json({
-      checkLogs,
+      checkLogs: checkLogs.map(formatCheckLog),
       totalPages: Math.ceil(count / limitNum),
       currentPage: pageNum,
       totalCheckLogs: count
     });
   } catch (error) {
-    console.error('GetAllCheckLogs error:', error);
+    logger.error('GetAllCheckLogs error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Get single check log
- */
+// GET /api/checklogs/:id
 const getCheckLog = async (req, res) => {
   try {
     const { id } = req.params;
-    if (!id) {
-      return res.status(400).json({ error: 'Check log id is required' });
-    }
+    const checkLog = await prisma.checkLog.findUnique({
+      where: { id },
+      include: {
+        visitor: true,
+        pass: true,
+        checkedInBy: { select: { id: true, name: true } },
+        checkedOutBy: { select: { id: true, name: true } }
+      }
+    });
 
-    const checkLog = await CheckLog.findById(id)
-      .populate('visitor')
-      .populate('pass')
-      .populate('checkedInBy', 'name')
-      .populate('checkedOutBy', 'name');
+    if (!checkLog) return res.status(404).json({ error: 'Check log not found' });
 
-    if (!checkLog) {
-      return res.status(404).json({ error: 'Check log not found' });
-    }
-
-    return res.status(200).json(checkLog);
+    return res.status(200).json(formatCheckLog(checkLog));
   } catch (error) {
-    console.error('GetCheckLog error:', error);
+    logger.error('GetCheckLog error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Get currently checked-in visitors
- */
+// GET /api/checklogs/current (currently inside)
 const getCurrentVisitors = async (req, res) => {
   try {
-    const currentVisitors = await CheckLog.find({ checkOutTime: null })
-      .populate('visitor')
-      .populate('pass')
-      .populate('checkedInBy', 'name')
-      .sort({ checkInTime: -1 });
+    const currentVisitors = await prisma.checkLog.findMany({
+      where: { checkOutTime: null },
+      include: {
+        visitor: true,
+        pass: true,
+        checkedInBy: { select: { id: true, name: true } }
+      },
+      orderBy: { checkInTime: 'desc' }
+    });
 
-    return res.status(200).json(currentVisitors);
+    return res.status(200).json(currentVisitors.map(formatCheckLog));
   } catch (error) {
-    console.error('GetCurrentVisitors error:', error);
+    logger.error('GetCurrentVisitors error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Get check log statistics
- */
+// GET /api/checklogs/stats
 const getCheckLogStats = async (req, res) => {
   try {
     const today = new Date();
@@ -300,70 +265,59 @@ const getCheckLogStats = async (req, res) => {
     const tomorrow = new Date(today);
     tomorrow.setDate(tomorrow.getDate() + 1);
 
-    const [
+    const [currentlyInside, todayCheckIns, todayCheckOuts, totalVisits, todayCompletedLogs] = await Promise.all([
+      prisma.checkLog.count({ where: { checkOutTime: null } }),
+      prisma.checkLog.count({ where: { checkInTime: { gte: today, lt: tomorrow } } }),
+      prisma.checkLog.count({ where: { checkOutTime: { gte: today, lt: tomorrow } } }),
+      prisma.checkLog.count(),
+      prisma.checkLog.findMany({
+        where: {
+          checkInTime: { gte: today, lt: tomorrow },
+          checkOutTime: { not: null }
+        },
+        select: { checkInTime: true, checkOutTime: true }
+      })
+    ]);
+
+    let averageVisitDuration = 0;
+    if (todayCompletedLogs.length > 0) {
+      const totalMinutes = todayCompletedLogs.reduce((sum, log) => {
+        const diff = (new Date(log.checkOutTime).getTime() - new Date(log.checkInTime).getTime()) / 60000;
+        return sum + diff;
+      }, 0);
+      averageVisitDuration = Math.round(totalMinutes / todayCompletedLogs.length);
+    }
+
+    return res.status(200).json({
       currentlyInside,
       todayCheckIns,
       todayCheckOuts,
       totalVisits,
-      todayLogs
-    ] = await Promise.all([
-      CheckLog.countDocuments({ checkOutTime: null }),
-      CheckLog.countDocuments({
-        checkInTime: { $gte: today, $lt: tomorrow }
-      }),
-      CheckLog.countDocuments({
-        checkOutTime: { $gte: today, $lt: tomorrow }
-      }),
-      CheckLog.countDocuments(),
-      CheckLog.find({
-        checkInTime: { $gte: today, $lt: tomorrow },
-        checkOutTime: { $ne: null }
-      })
-    ]);
-
-    const stats = {
-      currentlyInside,
-      todayCheckIns,
-      todayCheckOuts,
-      totalVisits
-    };
-
-    if (todayLogs.length > 0) {
-      const totalDuration = todayLogs.reduce((sum, log) => {
-        const duration = (log.checkOutTime - log.checkInTime) / (1000 * 60); // minutes
-        return sum + duration;
-      }, 0);
-      stats.averageVisitDuration = Math.round(totalDuration / todayLogs.length);
-    } else {
-      stats.averageVisitDuration = 0;
-    }
-
-    return res.status(200).json(stats);
+      averageVisitDuration
+    });
   } catch (error) {
-    console.error('GetCheckLogStats error:', error);
+    logger.error('GetCheckLogStats error:', error);
     return res.status(500).json({ error: error.message });
   }
 };
 
-/**
- * Get visitor history by visitorId
- */
+// GET /api/checklogs/visitor/:visitorId
 const getVisitorHistory = async (req, res) => {
   try {
     const { visitorId } = req.params;
-    if (!visitorId) {
-      return res.status(400).json({ error: 'visitorId is required' });
-    }
+    const history = await prisma.checkLog.findMany({
+      where: { visitorId },
+      include: {
+        pass: true,
+        checkedInBy: { select: { id: true, name: true } },
+        checkedOutBy: { select: { id: true, name: true } }
+      },
+      orderBy: { checkInTime: 'desc' }
+    });
 
-    const history = await CheckLog.find({ visitor: visitorId })
-      .populate('pass')
-      .populate('checkedInBy', 'name')
-      .populate('checkedOutBy', 'name')
-      .sort({ checkInTime: -1 });
-
-    return res.status(200).json(history);
+    return res.status(200).json(history.map(formatCheckLog));
   } catch (error) {
-    console.error('GetVisitorHistory error:', error);
+    logger.error('GetVisitorHistory error:', error);
     return res.status(500).json({ error: error.message });
   }
 };

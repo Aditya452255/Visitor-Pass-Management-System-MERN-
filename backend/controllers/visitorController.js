@@ -1,266 +1,325 @@
-const Visitor = require('../models/Visitor');
-const path = require('path');
-const fs = require('fs');
+const prisma = require('../config/prisma');
+const storageService = require('../services/storageService');
+const { logger } = require('../utils/logger');
 
-// Register a new visitor
+// Format visitor with both _id and id
+const formatVisitor = (v) => {
+  if (!v) return null;
+  return {
+    ...v,
+    _id: v.id
+  };
+};
+
+// Register a new visitor (Admin / Security)
 const registerVisitor = async (req, res) => {
   try {
     const { name, email, phone, company, idType, idNumber, address, purpose, vehicleNumber } = req.body;
 
-    // Resolve User by email or logged-in user
-    const userId = req.user?._id;
-    const user = userId ? userId : null;
-    if (!user && !email) {
+    const userId = req.user?.id || req.user?._id;
+    if (!userId && !email) {
       return res.status(400).json({ error: 'User context or email is required to link visitor' });
     }
 
-    // If visitor already exists for this user, block duplicate
-    if (user) {
-      const existingByUser = await Visitor.findOne({ user });
-      if (existingByUser) return res.status(200).json(existingByUser);
+    const normalizedEmail = (email || '').trim().toLowerCase();
+
+    // Check if visitor already exists for this user or email
+    if (userId) {
+      const existingByUser = await prisma.visitor.findUnique({
+        where: { userId }
+      });
+      if (existingByUser) return res.status(200).json(formatVisitor(existingByUser));
     }
 
-    // If existing visitor by email with user, return it
-    const existingByEmail = await Visitor.findOne({ email });
-    if (existingByEmail) return res.status(200).json(existingByEmail);
+    if (normalizedEmail) {
+      const existingByEmail = await prisma.visitor.findFirst({
+        where: { email: normalizedEmail }
+      });
+      if (existingByEmail) return res.status(200).json(formatVisitor(existingByEmail));
+    }
 
-    // Check if photo was uploaded
-    if (!req.file) {
+    // Photo check
+    const photoUrl = req.file?.url || req.file?.secure_url || req.file?.path;
+    if (!photoUrl) {
       return res.status(400).json({ error: 'Photo is required' });
     }
 
-    const visitor = await Visitor.create({
-      user: user || (req.body.userId ? req.body.userId : undefined),
-      name,
-      email,
-      phone,
-      company,
-      idType,
-      idNumber,
-      address,
-      purpose,
-      vehicleNumber,
-      photo: req.file?.secure_url || req.file?.path || null,
-      visitCount: 1,
-      lastVisit: new Date()
+    const validIdTypes = ['passport', 'driving_license', 'national_id', 'other'];
+    const chosenIdType = validIdTypes.includes(idType) ? idType : 'other';
+
+    const visitor = await prisma.visitor.create({
+      data: {
+        userId: userId || undefined,
+        name: name.trim(),
+        email: normalizedEmail,
+        phone: phone.trim(),
+        company: company ? company.trim() : null,
+        idType: chosenIdType,
+        idNumber: idNumber ? idNumber.trim() : 'N/A',
+        address: address ? address.trim() : null,
+        purpose: purpose ? purpose.trim() : 'General Visit',
+        vehicleNumber: vehicleNumber ? vehicleNumber.trim() : null,
+        photo: photoUrl,
+        visitCount: 1,
+        lastVisit: new Date()
+      }
     });
 
-    res.status(201).json(visitor);
+    return res.status(201).json(formatVisitor(visitor));
   } catch (error) {
-    console.error('Error registering visitor:', error);
-    res.status(400).json({ error: error.message });
+    logger.error('Error registering visitor:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Public registration (used for pre-registration by visitors)
+// Public pre-registration
 const registerVisitorPublic = async (req, res) => {
   try {
     const { name, email, phone, company, idType, idNumber, address, purpose, vehicleNumber } = req.body;
 
-    // Photo is required for registration
-    if (!req.file) {
+    const photoUrl = req.file?.url || req.file?.secure_url || req.file?.path;
+    if (!photoUrl) {
       return res.status(400).json({ error: 'Photo is required' });
     }
 
-    // Must map to existing user by email to satisfy visitor.user link
-    const userDoc = await require('../models/User').findOne({ email });
+    const normalizedEmail = (email || '').trim().toLowerCase();
+    if (!normalizedEmail) {
+      return res.status(400).json({ error: 'Email is required' });
+    }
+
+    const userDoc = await prisma.user.findUnique({
+      where: { email: normalizedEmail }
+    });
+
     if (!userDoc) {
       return res.status(400).json({ error: 'User account not found for this email. Please sign up first.' });
     }
 
-    // Check if visitor already exists
-    let visitor = await Visitor.findOne({ user: userDoc._id });
+    let visitor = await prisma.visitor.findFirst({
+      where: {
+        OR: [
+          { userId: userDoc.id },
+          { email: normalizedEmail }
+        ]
+      }
+    });
+
+    const validIdTypes = ['passport', 'driving_license', 'national_id', 'other'];
+    const chosenIdType = validIdTypes.includes(idType) ? idType : 'other';
 
     if (visitor) {
-      // Do not require authentication: update some fields but do not change role
-      visitor.name = name || visitor.name;
-      visitor.phone = phone || visitor.phone;
-      visitor.company = company || visitor.company;
-      visitor.idType = idType || visitor.idType;
-      visitor.idNumber = idNumber || visitor.idNumber;
-      visitor.address = address || visitor.address;
-      visitor.purpose = purpose || visitor.purpose;
-      visitor.vehicleNumber = vehicleNumber || visitor.vehicleNumber;
-      visitor.visitCount = (visitor.visitCount || 0) + 1;
-      visitor.lastVisit = new Date();
-
-      // Replace photo
-      if (req.file) {
-        const photoPath = req.file?.secure_url || req.file?.path || null;
-        visitor.photo = photoPath;
-        visitor.user = userDoc._id;
-      }
-
-      await visitor.save();
+      visitor = await prisma.visitor.update({
+        where: { id: visitor.id },
+        data: {
+          name: name ? name.trim() : visitor.name,
+          phone: phone ? phone.trim() : visitor.phone,
+          company: company ? company.trim() : visitor.company,
+          idType: chosenIdType,
+          idNumber: idNumber ? idNumber.trim() : visitor.idNumber,
+          address: address ? address.trim() : visitor.address,
+          purpose: purpose ? purpose.trim() : visitor.purpose,
+          vehicleNumber: vehicleNumber ? vehicleNumber.trim() : visitor.vehicleNumber,
+          visitCount: visitor.visitCount + 1,
+          lastVisit: new Date(),
+          photo: photoUrl || visitor.photo,
+          userId: userDoc.id
+        }
+      });
     } else {
-      // Create new visitor record
-      visitor = await Visitor.create({
-        user: userDoc._id,
-        name,
-        email,
-        phone,
-        company,
-        idType,
-        idNumber,
-        address,
-        purpose,
-        vehicleNumber,
-        photo: req.file?.secure_url || req.file?.path || null,
-        visitCount: 1,
-        lastVisit: new Date()
+      visitor = await prisma.visitor.create({
+        data: {
+          userId: userDoc.id,
+          name: name.trim(),
+          email: normalizedEmail,
+          phone: phone.trim(),
+          company: company ? company.trim() : null,
+          idType: chosenIdType,
+          idNumber: idNumber ? idNumber.trim() : 'N/A',
+          address: address ? address.trim() : null,
+          purpose: purpose ? purpose.trim() : 'Pre-registered Visit',
+          vehicleNumber: vehicleNumber ? vehicleNumber.trim() : null,
+          photo: photoUrl,
+          visitCount: 1,
+          lastVisit: new Date()
+        }
       });
     }
 
-    res.status(201).json(visitor);
+    return res.status(201).json(formatVisitor(visitor));
   } catch (error) {
-    console.error('Error in public registration:', error);
-    res.status(400).json({ error: error.message });
+    logger.error('Error in public registration:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Get all visitors
+// GET /api/visitors (searchable, paginated)
 const getAllVisitors = async (req, res) => {
   try {
     const { search, page = 1, limit = 10 } = req.query;
-    
-    let query = {};
-    
-    // Search functionality
+    const pageNum = Math.max(parseInt(page, 10) || 1, 1);
+    const limitNum = Math.max(parseInt(limit, 10) || 10, 1);
+
+    const where = {};
     if (search) {
-      query.$or = [
-        { name: { $regex: search, $options: 'i' } },
-        { email: { $regex: search, $options: 'i' } },
-        { phone: { $regex: search, $options: 'i' } },
-        { company: { $regex: search, $options: 'i' } }
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+        { phone: { contains: search, mode: 'insensitive' } },
+        { company: { contains: search, mode: 'insensitive' } }
       ];
     }
 
-    const visitors = await Visitor.find(query)
-      .sort({ createdAt: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit);
+    const [visitors, count] = await Promise.all([
+      prisma.visitor.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip: (pageNum - 1) * limitNum,
+        take: limitNum
+      }),
+      prisma.visitor.count({ where })
+    ]);
 
-    const count = await Visitor.countDocuments(query);
-
-    res.status(200).json({
-      visitors,
-      totalPages: Math.ceil(count / limit),
-      currentPage: page,
+    return res.status(200).json({
+      visitors: visitors.map(formatVisitor),
+      totalPages: Math.ceil(count / limitNum),
+      currentPage: pageNum,
       totalVisitors: count
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Get all visitors error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Get single visitor
+// GET /api/visitors/:id
 const getVisitor = async (req, res) => {
   try {
     const { id } = req.params;
-    const visitor = await Visitor.findById(id);
+    const visitor = await prisma.visitor.findUnique({
+      where: { id }
+    });
 
     if (!visitor) {
       return res.status(404).json({ error: 'Visitor not found' });
     }
 
-    res.status(200).json(visitor);
+    return res.status(200).json(formatVisitor(visitor));
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Get visitor error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Update visitor
+// PATCH /api/visitors/:id
 const updateVisitor = async (req, res) => {
   try {
     const { id } = req.params;
-    const updateData = req.body;
+    const updateData = { ...req.body };
 
-    // If new photo uploaded
-    if (req.file) {
-      const visitor = await Visitor.findById(id);
-      
-      // Delete old photo
-      if (visitor.photo && fs.existsSync(path.join(__dirname, '..', visitor.photo))) {
-        fs.unlinkSync(path.join(__dirname, '..', visitor.photo));
-      }
-      
-      updateData.photo = req.file.path;
-    }
+    const existingVisitor = await prisma.visitor.findUnique({
+      where: { id }
+    });
 
-     const updatedVisitor = await Visitor.findByIdAndUpdate(
-      id,
-      updateData,
-      { new: true, runValidators: true }
-    );
-
-    if (!updatedVisitor) {
+    if (!existingVisitor) {
       return res.status(404).json({ error: 'Visitor not found' });
     }
 
-    res.status(200).json(updatedVisitor);
+    // Handle replacement photo
+    const photoUrl = req.file?.url || req.file?.secure_url || req.file?.path;
+    if (photoUrl) {
+      if (existingVisitor.photo) {
+        await storageService.deleteFile(existingVisitor.photo);
+      }
+      updateData.photo = photoUrl;
+    }
+
+    // Clean up fields that shouldn't be directly overwritten
+    delete updateData.id;
+    delete updateData._id;
+    delete updateData.createdAt;
+
+    const updatedVisitor = await prisma.visitor.update({
+      where: { id },
+      data: updateData
+    });
+
+    return res.status(200).json(formatVisitor(updatedVisitor));
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Update visitor error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Blacklist/Unblacklist visitor
+// PATCH /api/visitors/:id/blacklist
 const toggleBlacklist = async (req, res) => {
   try {
     const { id } = req.params;
     const { isBlacklisted, blacklistReason } = req.body;
 
-    const visitor = await Visitor.findByIdAndUpdate(
-      id,
-      { isBlacklisted, blacklistReason },
-      { new: true }
-    );
+    const visitor = await prisma.visitor.update({
+      where: { id },
+      data: {
+        isBlacklisted: Boolean(isBlacklisted),
+        blacklistReason: isBlacklisted ? blacklistReason : null
+      }
+    });
 
-    if (!visitor) {
-      return res.status(404).json({ error: 'Visitor not found' });
-    }
-
-    res.status(200).json(visitor);
+    return res.status(200).json(formatVisitor(visitor));
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Toggle blacklist error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Delete visitor
+// DELETE /api/visitors/:id
 const deleteVisitor = async (req, res) => {
   try {
     const { id } = req.params;
-    const visitor = await Visitor.findById(id);
+
+    const visitor = await prisma.visitor.findUnique({
+      where: { id }
+    });
 
     if (!visitor) {
       return res.status(404).json({ error: 'Visitor not found' });
     }
 
-    // Delete photo file
-    if (visitor.photo && fs.existsSync(path.join(__dirname, '..', visitor.photo))) {
-      fs.unlinkSync(path.join(__dirname, '..', visitor.photo));
+    // Delete photo safely via storage service
+    if (visitor.photo) {
+      await storageService.deleteFile(visitor.photo);
     }
 
-    await Visitor.findByIdAndDelete(id);
-    res.status(200).json({ message: 'Visitor deleted successfully' });
+    await prisma.visitor.delete({
+      where: { id }
+    });
+
+    return res.status(200).json({ message: 'Visitor deleted successfully' });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Delete visitor error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 
-// Get visitor statistics
+// GET /api/visitors/stats
 const getVisitorStats = async (req, res) => {
   try {
-    const totalVisitors = await Visitor.countDocuments();
-    const blacklistedVisitors = await Visitor.countDocuments({ isBlacklisted: true });
-    const frequentVisitors = await Visitor.find().sort({ visitCount: -1 }).limit(10);
+    const [totalVisitors, blacklistedVisitors, frequentVisitors] = await Promise.all([
+      prisma.visitor.count(),
+      prisma.visitor.count({ where: { isBlacklisted: true } }),
+      prisma.visitor.findMany({
+        orderBy: { visitCount: 'desc' },
+        take: 10
+      })
+    ]);
 
-    res.status(200).json({
+    return res.status(200).json({
       totalVisitors,
       blacklistedVisitors,
-      frequentVisitors
+      frequentVisitors: frequentVisitors.map(formatVisitor)
     });
   } catch (error) {
-    res.status(400).json({ error: error.message });
+    logger.error('Get visitor stats error:', error);
+    return res.status(400).json({ error: error.message });
   }
 };
 

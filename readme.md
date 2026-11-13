@@ -1,279 +1,163 @@
-# Visitor Pass Management System
+# Visitor Pass Management System (AWS Ready)
 
-A comprehensive full-stack web application for managing visitor passes, appointments, and check-in/check-out processes for organizations.
+A modernized full-stack web application for visitor pass issuance, appointment approvals, QR badge generation, and check-in / check-out workflows.
 
-## Deploy 
-- [Deploy](https://visitor-pass-management-system-mern.vercel.app/)
+Migrated from MongoDB (MERN) to **PostgreSQL + Prisma ORM** with **AWS S3** file storage, **AWS SES** email support, structured **Winston** logging, and an **AWS Lambda-compatible** auto-checkout background job.
+
+---
 
 - [Video](https://www.loom.com/share/363a1035a04647199f06bbc81bc69df6)
 
 ## 🏗️ Architecture
 
-**MERN Stack Application:**
-- **M**ongoDB - Database
-- **E**xpress.js - Backend Framework
-- **R**eact.js - Frontend Framework
-- **N**ode.js - Runtime Environment
-
 ```
-Frontend (React)  ←→  Backend (Express/Node)  ←→  Database (MongoDB)
+React 19 Frontend  ──►  Express 5 (Node.js)  ──►  PostgreSQL (Prisma ORM)
+                             │
+            ┌────────────────┼────────────────┐
+            ▼                ▼                ▼
+     AWS S3 Storage    AWS SES Email     Lambda / EventBridge
+   (presigned URLs)   (or SMTP dev)     (auto-checkout job)
 ```
 
-## ✨ Features
+- **Frontend**: React 19, React Router, HTML5 QR Scanner, CSS Modules / responsive design
+- **Backend**: Node.js (v20+), Express 5, Prisma ORM 6.4.0, Helmet, Express-Rate-Limit, Winston
+- **Database**: PostgreSQL (relational foreign keys, indexes, enums, migrations)
+- **File Storage**: AWS S3 (AWS SDK v3, private bucket + presigned URLs, local disk fallback for dev)
+- **Email Service**: AWS SES in production, SMTP / mock fallback for development
+- **Scheduled Tasks**: AWS Lambda + EventBridge compatible auto-checkout handler (`backend/jobs/autoCheckout.js`)
 
-### For Admin
-- **User Management**: Create and manage Employee and Security staff accounts
-- Issue visitor passes with QR codes
-- Manage appointments (approve/reject/cancel)
-- View all visitors and check-in/out logs
-- Blacklist/unblacklist visitors
-- Generate and download pass PDFs
-- Dashboard with statistics and analytics
+---
 
-### For Employees
-- **Edit Profile**: Update name, email, phone, and department
-- Create visitor appointments (see all employees as hosts)
-- View and manage their appointments
-- Track visitor check-ins related to their appointments
+## 💻 Local Setup Instructions (Windows PowerShell)
 
-### For Visitors
-- Register and create appointment requests (visitors only during signup)
-- **Edit Profile**: Update personal information
-- View appointment status
-- View their passes with QR codes
-- Cancel their own appointments
-- Track their visit history
+Follow these step-by-step instructions to run and test the complete system locally:
 
-### System Features
-- QR code-based check-in/check-out
-- Automatic checkout after configurable duration
-- Email and SMS notifications (optional)
-- Role-based access control (Admin, Employee, Security, Visitor)
-- Photo upload for appointments
-- Export data to CSV/Excel
-- Dynamic employee/host selection (all employees available after creation)
+### 1. Prerequisites
+- **Node.js**: v20.x or higher (`node -v`)
+- **npm**: v10.x or higher (`npm -v`)
+- **PostgreSQL**: Installed and running on `localhost:5432` (`pg_isready`)
 
-## 🚀 Quick Start
+### 2. PostgreSQL Database Creation
+Open PowerShell or your PostgreSQL CLI (`psql`) and create the database:
+```powershell
+# Using psql:
+psql -U postgres -c "CREATE DATABASE visitor_pass_db;"
+```
+*(Or create `visitor_pass_db` using pgAdmin 4).*
 
-### Prerequisites
-- Node.js (v14 or higher)
-- MongoDB (local or Atlas)
-- npm or yarn
-
-### Backend Setup
-
-```bash
-cd backend
+### 3. Backend Dependency Installation
+```powershell
+Set-Location "backend"
 npm install
 ```
 
-Create a `.env` file (use `.env.example` as template):
+### 4. Environment Configuration
+Copy `.env.example` to `.env` in the `backend/` folder:
+```powershell
+Copy-Item .env.example .env
+```
+Open `backend/.env` and update your PostgreSQL password:
 ```env
-MONGO_URI=mongodb://localhost:27017/visitor-pass-db
-JWT_SECRET=your-secret-key
+DATABASE_URL="postgresql://postgres:YOUR_PASSWORD@localhost:5432/visitor_pass_db?schema=public"
+JWT_SECRET="your-32-character-random-secret-key"
 PORT=5000
-FRONTEND_URL=http://localhost:3000
+STORAGE_PROVIDER=local
+EMAIL_PROVIDER=smtp
 ```
 
-Start the backend:
-```bash
+### 5. Prisma Client Generation
+Generate the Prisma Client:
+```powershell
+npm run db:generate
+```
+
+### 6. Database Migrations
+Apply the initial SQL migration to create all tables, enums, and foreign-key constraints:
+```powershell
+npm run db:migrate
+```
+
+### 7. Seed Initial Data
+Seed standard roles (Admin, Security, Host/Employee, Visitor) and sample records:
+```powershell
+npm run db:seed
+```
+
+**Default Seeded Credentials:**
+| Role | Email | Password |
+|---|---|---|
+| **Admin** | `admin@example.com` | `Admin@123456` |
+| **Employee (Host)** | `employee@example.com` | `Employee@123456` |
+| **Security Guard** | `security@example.com` | `Security@123456` |
+| **Visitor** | `visitor@example.com` | `Visitor@123456` |
+
+### 8. Start Backend API Server
+```powershell
 npm run dev
+# Server will run on http://localhost:5000
 ```
 
-### Frontend Setup
-
-```bash
-cd frontend
-npm install --legacy-peer-deps
+### 9. Frontend Dependency Installation
+In a second PowerShell window:
+```powershell
+Set-Location "frontend"
+npm install
 ```
 
-Create a `.env` file (use `.env.example` as template):
-```env
-REACT_APP_API_URL=http://localhost:5000/api
-```
-
-Start the frontend:
-```bash
+### 10. Start Frontend Application
+```powershell
 npm start
+# Client will launch in browser at http://localhost:3000
 ```
 
-The application will open at `http://localhost:3000`
+---
 
-## 📦 Tech Stack
+## 🧪 Testing Commands
 
-### Backend
-- Express.js - Web framework
-- Mongoose - MongoDB ODM
-- JWT - Authentication
-- Bcrypt - Password hashing
-- Multer - File uploads
-- QRCode - QR code generation
-- PDFKit - PDF generation
-- Nodemailer - Email service
-- Twilio - SMS service (optional)
-
-### Frontend
-- React.js - UI framework
-- React Router - Navigation
-- Axios - HTTP client
-- html5-qrcode - QR scanning
-- react-toastify - Notifications
-- Recharts - Charts/analytics
-- date-fns - Date formatting
-
-## 🌐 Deployment
-
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for detailed instructions on deploying to Render.
-
-### Quick Deploy to Render
-
-1. **Backend**: Deploy as Web Service
-   - Build: `npm install`
-   - Start: `npm start`
-   - Add environment variables
-
-2. **Frontend**: Deploy as Static Site
-   - Build: `npm install && npm run build`
-   - Publish: `build`
-   - Add `REACT_APP_API_URL` environment variable
-
-## 📁 Project Structure
-
-```
-├── backend/
-│   ├── config/          # Database configuration
-│   ├── controllers/     # Route controllers
-│   ├── middleware/      # Auth & validation
-│   ├── models/          # Mongoose models
-│   ├── routes/          # API routes
-│   ├── scripts/         # Utility scripts (seedData, createAdmin, deleteAppointment, etc.)
-│   ├── uploads/         # File uploads
-│   └── utils/           # Helper functions (emailService, pdfGenerator, etc.)
-│
-├── frontend/
-│   ├── public/          # Static files
-│   └── src/
-│       ├── components/  # React components
-│       │   ├── Appointment/
-│       │   ├── Auth/
-│       │   ├── Checklog/
-│       │   ├── Pass/
-│       │   ├── Shared/
-│       │   ├── User/        # New: User Management component
-│       │   └── Visitor/
-│       ├── context/     # Context providers
-│       ├── hooks/       # Custom hooks
-│       ├── pages/       # Page components
-│       ├── services/    # API services
-│       └── utils/       # Utilities
-│
-├── DEPLOYMENT.md        # Deployment guide
-└── README.md           # This file
+### Backend Automated Test Suite
+Run the 17 unit and integration tests covering security, storage, PDF generation, QR payloads, and services:
+```powershell
+Set-Location "backend"
+npm test
 ```
 
-## 🔒 Security Features
-
-- JWT-based authentication
-- Role-based authorization
-- Password hashing with bcrypt
-- CORS configuration
-- Input validation
-- Secure file uploads
-
-## 📊 API Endpoints
-
-### Authentication
-- `POST /api/auth/signup` - Register new visitor (visitors only)
-- `POST /api/auth/login` - Login user
-- `POST /api/auth/create-user` - Create Employee/Security user (Admin only)
-- `GET /api/auth/profile` - Get current user profile
-- `PUT /api/auth/profile` - Update profile (Visitor, Employee)
-- `GET /api/auth/users` - Get all users (Admin only)
-- `PUT /api/auth/users/:id/role` - Update user role/status (Admin only)
-- `DELETE /api/auth/users/:id` - Delete user (Admin only)
-
-### Visitors
-- `GET /api/visitors` - Get all visitors (Admin)
-- `POST /api/visitors` - Register visitor
-- `PATCH /api/visitors/:id` - Update visitor (Admin, Security)
-- `DELETE /api/visitors/:id` - Delete visitor (Admin only)
-- `PATCH /api/visitors/:id/blacklist` - Toggle blacklist status (Admin only)
-
-### Appointments
-- `GET /api/appointments` - Get appointments
-- `POST /api/appointments` - Create appointment
-- `PATCH /api/appointments/:id` - Update appointment
-- `PATCH /api/appointments/:id/approve` - Approve appointment (Admin, Employee)
-- `PATCH /api/appointments/:id/reject` - Reject appointment (Admin, Employee)
-- `PATCH /api/appointments/:id/cancel` - Cancel appointment
-- `DELETE /api/appointments/:id` - Delete appointment
-- `GET /api/appointments/stats` - Get appointment statistics
-
-### Passes
-- `GET /api/passes` - Get passes
-- `POST /api/passes` - Issue pass (Admin, Security)
-- `GET /api/passes/:id` - Get single pass
-- `GET /api/passes/:id/pdf` - Download pass PDF
-- `PATCH /api/passes/:id/revoke` - Revoke pass (Admin only)
-
-### Check Logs
-- `GET /api/checklogs` - Get check-in/out logs
-- `POST /api/checklogs/checkin` - Check in visitor (Admin, Security)
-- `POST /api/checklogs/checkout` - Check out visitor
-- `GET /api/checklogs/visitor/:visitorId` - Get visitor check history
-- # Create Employee/Security User (via Admin Panel)
-1. Login as Admin
-2. Navigate to `/users` (Users section in navbar)
-3. Click "+ Create User"
-4. Select role (Employee or Security)
-5. Fill in details and submit
-
-### Edit Employee Profile
-1. Login as Employee
-2. Click "Profile" in navbar
-3. Click "Edit Profile"
-4. Update information and save
-
-### Delete Appointment by Purpose
-```bash
-cd backend
-node scripts/deleteAppointment.js
+### Frontend Test & Build
+```powershell
+Set-Location "frontend"
+$env:CI="true"; npm test -- --watchAll=false
+npm run build
 ```
 
-## 📝 Recent Updates (Jan 2026)
-
-- ✅ **Public Signup**: Visitors only - removed Employee/Security role selection
-- ✅ **Admin User Management**: Create and manage Employee/Security staff
-- ✅ **Dynamic Host Selection**: Appointment and Pass forms now show all employees
-- ✅ **Employee Profile**: Employees can now edit their profile information
-- ✅ **Improved Access Control**: Role-based access to all features
-
-##`GET /api/checklogs/stats` - Get check log statistics
-- `GET /api/checklogs/current` - Get current check status
-
-## 🛠️ Development
-
-### Create Admin User
-```bash
-cd backend
-node scripts/createAdmin.js
+### Standalone Auto-Checkout Job
+Manually trigger the auto-checkout batch runner:
+```powershell
+Set-Location "backend"
+npm run job:checkout
 ```
 
-### Seed Sample Data
-```bash
-cd backend
-node scripts/seedData.js
-```
+---
 
-## 📝 License
+## ⚠️ Common Errors and Solutions
 
-This project is licensed under the ISC License.
+| Issue | Cause | Solution |
+|---|---|---|
+| `P1001: Can't reach database server at localhost:5432` | PostgreSQL service stopped | Start PostgreSQL service in Windows Services (`services.msc`) or run `net start postgresql-x64-18`. |
+| `P1000: Authentication failed against database server` | Incorrect password in `DATABASE_URL` | Update the password in `backend/.env` to match your `postgres` superuser password. |
+| `P1012: Environment variable not found: DATABASE_URL` | `.env` missing in `backend/` | Ensure `backend/.env` exists and contains `DATABASE_URL`. |
+| `CORS Error in Frontend` | `FRONTEND_URL` mismatch | In `backend/.env`, ensure `FRONTEND_URL=http://localhost:3000`. |
+| `Only image files are allowed` | File upload validation | Ensure the uploaded file is a valid image (`.jpg`, `.jpeg`, `.png`, or `.webp`) under 5MB. |
 
-## 👨‍💻 Author
+---
 
-Aditya Jain
+## ☁️ Production AWS Deployment (EC2 + Nginx)
+
+1. **EC2 Instance**: Ubuntu 22.04 LTS (t3.small or t3.medium recommended) with IAM Instance Profile for S3 (`s3:PutObject`, `s3:GetObject`) and SES (`ses:SendRawEmail`).
+2. **Reverse Proxy (Nginx)**: Proxy `/api/` to `http://127.0.0.1:5000` and serve static frontend from `frontend/build`.
+3. **Environment**:
+   - Set `STORAGE_PROVIDER=s3` and specify `AWS_S3_BUCKET` and `AWS_REGION`.
+   - Set `EMAIL_PROVIDER=ses` and specify `AWS_SES_FROM_EMAIL`.
+   - Leave `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` blank to let the AWS SDK automatically assume the EC2 IAM Instance Profile role.
 
 ## 🤝 Contributing
 
 Contributions, issues, and feature requests are welcome!
-npm install date-fns

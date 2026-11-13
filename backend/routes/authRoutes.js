@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const rateLimit = require('express-rate-limit');
 
 const {
   loginUser,
@@ -16,9 +17,18 @@ const {
 const auth = require('../middleware/auth');
 const checkRole = require('../middleware/roleCheck');
 
+// Strict rate limit for auth endpoints (20 attempts per 15 min)
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: 'Too many login attempts, please try again later.' }
+});
+
 // Public routes
-router.post('/login', loginUser);
-router.post('/signup', signupUser);
+router.post('/login', authLimiter, loginUser);
+router.post('/signup', authLimiter, signupUser);
 
 // Public route to fetch hosts (employees/admins) for appointment forms
 router.get('/hosts', getHosts);

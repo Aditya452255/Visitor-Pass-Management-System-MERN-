@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const prisma = require('../config/prisma');
+const { logger } = require('../utils/logger');
 
 const auth = async (req, res, next) => {
   const { authorization } = req.headers;
@@ -11,16 +12,43 @@ const auth = async (req, res, next) => {
   const token = authorization.split(' ')[1];
 
   try {
-    const { _id } = jwt.verify(token, process.env.JWT_SECRET);
-    const user = await User.findById(_id).select('_id name email role department');
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const userId = decoded._id || decoded.id;
 
-    if (!user) return res.status(401).json({ error: 'User not found' });
-    // Normalize role to lowercase to avoid capitalization mismatches
-    user.role = (user.role || '').toString().toLowerCase();
-    req.user = user;
+    if (!userId) {
+      return res.status(401).json({ error: 'Invalid token payload' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        department: true,
+        isActive: true
+      }
+    });
+
+    if (!user) {
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    if (!user.isActive) {
+      return res.status(403).json({ error: 'User account is deactivated' });
+    }
+
+    // Attach both id and _id for backward compatibility
+    req.user = {
+      ...user,
+      _id: user.id,
+      role: (user.role || '').toString().toLowerCase()
+    };
+
     next();
   } catch (error) {
-    console.error('Auth error:', error.message);
+    logger.warn('Auth verification failed:', error.message);
     res.status(401).json({ error: 'Invalid or expired token' });
   }
 };

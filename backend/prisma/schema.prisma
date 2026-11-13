@@ -1,0 +1,189 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  admin
+  security
+  employee
+  visitor
+}
+
+enum IdType {
+  passport
+  driving_license
+  national_id
+  other
+}
+
+enum AppointmentStatus {
+  pending
+  approved
+  rejected
+  completed
+  cancelled
+}
+
+enum PassStatus {
+  active
+  expired
+  revoked
+}
+
+model User {
+  id                   String        @id @default(uuid())
+  name                 String
+  email                String        @unique
+  password             String
+  phone                String
+  role                 Role          @default(employee)
+  department           String?
+  isActive             Boolean       @default(true)
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+
+  // Relations
+  visitorProfile       Visitor?
+  hostedAppointments   Appointment[] @relation("HostAppointments")
+  approvedAppointments Appointment[] @relation("ApprovedAppointments")
+  createdAppointments  Appointment[] @relation("CreatedAppointments")
+  issuedPasses         Pass[]        @relation("IssuedPasses")
+  hostedPasses         Pass[]        @relation("HostedPasses")
+  checkedInLogs        CheckLog[]    @relation("CheckedInBy")
+  checkedOutLogs       CheckLog[]    @relation("CheckedOutBy")
+
+  @@index([email])
+  @@index([role])
+  @@map("users")
+}
+
+model Visitor {
+  id              String        @id @default(uuid())
+  userId          String?       @unique
+  user            User?         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  name            String
+  email           String
+  phone           String
+  company         String?
+  idType          IdType        @default(other)
+  idNumber        String
+  photo           String
+  address         String?
+  purpose         String
+  vehicleNumber   String?
+  visitCount      Int           @default(0)
+  lastVisit       DateTime?
+  isBlacklisted   Boolean       @default(false)
+  blacklistReason String?
+  createdAt       DateTime      @default(now())
+  updatedAt       DateTime      @updatedAt
+
+  // Relations
+  appointments    Appointment[]
+  passes          Pass[]
+  checkLogs       CheckLog[]
+
+  @@index([email])
+  @@index([phone])
+  @@index([name])
+  @@map("visitors")
+}
+
+model Appointment {
+  id                String            @id @default(uuid())
+  visitorId         String?
+  visitor           Visitor?          @relation(fields: [visitorId], references: [id], onDelete: SetNull)
+  hostId            String
+  host              User              @relation("HostAppointments", fields: [hostId], references: [id], onDelete: Cascade)
+  appointmentDate   DateTime
+  appointmentTime   String
+  duration          Int               @default(60)
+  purpose           String
+  location          String
+  status            AppointmentStatus @default(pending)
+  approvedById      String?
+  approvedBy        User?             @relation("ApprovedAppointments", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvalDate      DateTime?
+  rejectionReason   String?
+  notes             String?
+  visitorPhoto      String?
+  notificationsSent Boolean           @default(false)
+  createdById       String?
+  createdBy         User?             @relation("CreatedAppointments", fields: [createdById], references: [id], onDelete: SetNull)
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  // Relations
+  passes            Pass[]
+
+  @@index([hostId])
+  @@index([visitorId])
+  @@index([appointmentDate])
+  @@index([status])
+  @@map("appointments")
+}
+
+model Pass {
+  id                  String        @id @default(uuid())
+  passNumber          String        @unique
+  visitorId           String
+  visitor             Visitor       @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  appointmentId       String?
+  appointment         Appointment?  @relation(fields: [appointmentId], references: [id], onDelete: SetNull)
+  issuedById          String?
+  issuedBy            User?         @relation("IssuedPasses", fields: [issuedById], references: [id], onDelete: SetNull)
+  hostId              String?
+  host                User?         @relation("HostedPasses", fields: [hostId], references: [id], onDelete: SetNull)
+  validFrom           DateTime
+  validUntil          DateTime
+  qrCode              String?       @db.Text
+  qrToken             String?       @unique
+  pdfPath             String?
+  status              PassStatus    @default(active)
+  accessAreas         String[]
+  specialInstructions String?
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relations
+  checkLogs           CheckLog[]
+
+  @@index([passNumber])
+  @@index([qrToken])
+  @@index([visitorId])
+  @@index([appointmentId])
+  @@index([status])
+  @@map("passes")
+}
+
+model CheckLog {
+  id             String    @id @default(uuid())
+  passId         String
+  pass           Pass      @relation(fields: [passId], references: [id], onDelete: Cascade)
+  visitorId      String
+  visitor        Visitor   @relation(fields: [visitorId], references: [id], onDelete: Cascade)
+  checkInTime    DateTime
+  checkOutTime   DateTime?
+  checkedInById  String?
+  checkedInBy    User?     @relation("CheckedInBy", fields: [checkedInById], references: [id], onDelete: SetNull)
+  checkedOutById String?
+  checkedOutBy   User?     @relation("CheckedOutBy", fields: [checkedOutById], references: [id], onDelete: SetNull)
+  temperature    Float?
+  deviceInfo     Json?
+  notes          String?
+  location       String?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@index([passId])
+  @@index([visitorId])
+  @@index([checkInTime])
+  @@index([checkOutTime])
+  @@map("check_logs")
+}
+

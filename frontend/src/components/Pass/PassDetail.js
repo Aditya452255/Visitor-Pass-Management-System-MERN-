@@ -162,7 +162,7 @@ const PassDetail = () => {
         <div className="pass-footer">
           {pass.pdfPath ? (
             <a
-              href={pass.pdfPath.startsWith('http') ? pass.pdfPath : `http://localhost:5000/${pass.pdfPath}`}
+              href={pass.pdfPath.startsWith('http') ? pass.pdfPath : `${(process.env.REACT_APP_API_URL || 'http://localhost:5000/api').replace('/api', '')}/${pass.pdfPath}`}
               target="_blank"
               rel="noopener noreferrer"
               className="btn-primary"

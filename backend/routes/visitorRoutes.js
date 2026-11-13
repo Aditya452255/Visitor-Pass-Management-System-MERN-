@@ -14,33 +14,33 @@ const {
 
 const auth = require('../middleware/auth');
 const checkRole = require('../middleware/roleCheck');
-const uploadVisitorPhotoCloudinary = require('../middleware/uploadVisitorPhotoCloudinary');
+const { uploadPhoto, processUploadedFile } = require('../middleware/uploadMiddleware');
 
-// Public pre-registration (no auth required)
-router.post('/register', uploadVisitorPhotoCloudinary.single('photo'), registerVisitorPublic);
+// Public pre-registration (photo upload handled via storageService)
+router.post('/register', uploadPhoto.single('photo'), processUploadedFile('visitor-photos'), registerVisitorPublic);
 
 // All other visitor routes require authentication
 router.use(auth);
 
-// Register a new visitor (accessible by security and admin)
-router.post('/', checkRole('admin', 'security'), uploadVisitorPhotoCloudinary.single('photo'), registerVisitor);
+// Register a new visitor (admin and security)
+router.post('/', checkRole('admin', 'security'), uploadPhoto.single('photo'), processUploadedFile('visitor-photos'), registerVisitor);
 
-// Get all visitors (accessible by security and admin)
+// Get all visitors (authenticated)
 router.get('/', getAllVisitors);
 
-// get visitor statistics (admin only)
+// Get visitor statistics (admin only)
 router.get('/stats', checkRole('admin'), getVisitorStats);
 
-// Get a single visitor by ID (accessible by security and admin)
+// Get single visitor
 router.get('/:id', getVisitor);
 
-// Update visitor details (accessible by security and admin)
-router.patch('/:id', checkRole('admin', 'security'), uploadVisitorPhotoCloudinary.single('photo'), updateVisitor);
+// Update visitor details
+router.patch('/:id', checkRole('admin', 'security'), uploadPhoto.single('photo'), processUploadedFile('visitor-photos'), updateVisitor);
 
 // Toggle blacklist status (admin only)
 router.patch('/:id/blacklist', checkRole('admin'), toggleBlacklist);
 
-// Delete a visitor (admin only)
+// Delete visitor (admin only)
 router.delete('/:id', checkRole('admin'), deleteVisitor);
 
 module.exports = router;
