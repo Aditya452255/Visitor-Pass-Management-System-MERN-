@@ -21,7 +21,7 @@
     "@aws-sdk/client-s3": "^3.1168.0",
     "@aws-sdk/client-ses": "^3.1168.0",
     "@aws-sdk/s3-request-presigner": "^3.1168.0",
-    "@prisma/client": "^6.4.0",
+    "@prisma/client": "^6.19.3",
     "bcrypt": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cloudinary": "^1.40.0",
@@ -44,6 +44,6 @@
   },
   "devDependencies": {
     "nodemon": "^3.1.10",
-    "prisma": "^6.4.0"
+    "prisma": "^6.19.3"
   }
 }
